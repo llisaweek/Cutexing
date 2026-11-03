@@ -1,0 +1,41 @@
+{
+  "entities": {
+    "UserProfile": {
+      "collection": "users",
+      "path": "/users/{userId}",
+      "description": "User profile with avatar URLs and account metadata",
+      "fields": {
+        "userId": { "type": "string", "description": "Authenticated user UID" },
+        "displayName": { "type": "string", "description": "User display name" },
+        "email": { "type": "string", "description": "User email address" },
+        "googlePhotoUrl": { "type": "string", "optional": true, "description": "Google account avatar URL" },
+        "customAvatarUrl": { "type": "string", "optional": true, "description": "Custom avatar URL in Firebase Storage" },
+        "avatarStoragePath": { "type": "string", "optional": true, "description": "Storage path for custom avatar" },
+        "createdAt": { "type": "timestamp", "description": "Document creation server timestamp" },
+        "updatedAt": { "type": "timestamp", "description": "Document update server timestamp" }
+      }
+    },
+    "Note": {
+      "collection": "notes",
+      "path": "/users/{userId}/notes/{noteId}",
+      "description": "User notes synced to Firestore supporting text, checklists, and canvas drawing",
+      "fields": {
+        "id": { "type": "string", "description": "Unique note ID" },
+        "userId": { "type": "string", "description": "Owner UID" },
+        "title": { "type": "string", "description": "Note title" },
+        "content": { "type": "string", "description": "Note body content" },
+        "color": { "type": "string", "description": "Note pastel color name" },
+        "isPinned": { "type": "boolean", "description": "Pinned status" },
+        "isArchived": { "type": "boolean", "description": "Archived status" },
+        "isDeleted": { "type": "boolean", "description": "Deleted/Trash status" },
+        "labels": { "type": "array", "description": "Associated label tags" },
+        "checklist": { "type": "array", "description": "Optional checklist items" },
+        "reminder": { "type": "string", "optional": true, "description": "Reminder text or timestamp" },
+        "drawingUrl": { "type": "string", "optional": true, "description": "Exported canvas sketch URL in Firebase Storage" },
+        "drawingStoragePath": { "type": "string", "optional": true, "description": "Storage path for sketch image" },
+        "createdAt": { "type": "timestamp", "description": "Creation timestamp" },
+        "updatedAt": { "type": "timestamp", "description": "Update timestamp" }
+      }
+    }
+  }
+}
