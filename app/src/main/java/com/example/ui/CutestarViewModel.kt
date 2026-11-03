@@ -3,6 +3,7 @@ package com.example.ui
 import android.app.Application
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.util.Base64
 import android.util.Log
@@ -11,6 +12,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.R
 import com.example.data.AuthRepository
+import com.example.data.LocalNotesStorage
 import com.example.data.SampleData
 import com.example.model.ChecklistItem
 import com.example.model.LayoutMode
@@ -37,14 +39,23 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
-import com.example.data.LocalNotesStorage
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
+import java.io.InputStream
 import java.util.UUID
+
+enum class NoteTypeFilter(val displayName: String) {
+  ALL("All"),
+  NOTES("Text"),
+  LISTS("Lists"),
+  DRAWINGS("Drawings"),
+  IMAGES("Images"),
+  REMINDERS("Reminders"),
+}
 
 class CutestarViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -94,8 +105,22 @@ class CutestarViewModel(application: Application) : AndroidViewModel(application
   private val _searchQuery = MutableStateFlow("")
   val searchQuery: StateFlow<String> = _searchQuery
 
+  private val _selectedTypeFilter = MutableStateFlow(NoteTypeFilter.ALL)
+  val selectedTypeFilter: StateFlow<NoteTypeFilter> = _selectedTypeFilter
+
+  private val _selectedColorFilter = MutableStateFlow<NoteColor?>(null)
+  val selectedColorFilter: StateFlow<NoteColor?> = _selectedColorFilter
+
   private val _layoutMode = MutableStateFlow(LayoutMode.STAGGERED_GRID)
   val layoutMode: StateFlow<LayoutMode> = _layoutMode
+
+  // Selection mode for batch operations (Keep signature feature)
+  private val _selectedNoteIds = MutableStateFlow<Set<String>>(emptySet())
+  val selectedNoteIds: StateFlow<Set<String>> = _selectedNoteIds.asStateFlow()
+
+  // Keep Settings preferences
+  private val _moveCheckedToBottom = MutableStateFlow(true)
+  val moveCheckedToBottom: StateFlow<Boolean> = _moveCheckedToBottom.asStateFlow()
 
   private var profileJob: Job? = null
   private var notesJob: Job? = null
@@ -178,6 +203,9 @@ class CutestarViewModel(application: Application) : AndroidViewModel(application
                   val reminder = doc.getString("reminder")
                   val drawingUrl = doc.getString("drawingUrl")
                   val drawingStoragePath = doc.getString("drawingStoragePath")
+                  val imageUrl = doc.getString("imageUrl")
+                  val imageStoragePath = doc.getString("imageStoragePath")
+                  val audioUrl = doc.getString("audioUrl")
 
                   NoteItem(
                     id = id,
@@ -192,6 +220,9 @@ class CutestarViewModel(application: Application) : AndroidViewModel(application
                     reminder = reminder,
                     drawingUrl = drawingUrl,
                     drawingStoragePath = drawingStoragePath,
+                    imageUrl = imageUrl,
+                    imageStoragePath = imageStoragePath,
+                    audioUrl = audioUrl,
                   )
                 } catch (parseError: Exception) {
                   Log.w("CutestarViewModel", "Error parsing note doc: ${parseError.message}")
@@ -201,6 +232,7 @@ class CutestarViewModel(application: Application) : AndroidViewModel(application
 
               if (cloudNotes.isNotEmpty()) {
                 _notes.value = cloudNotes
+                localStorage.saveNotes(cloudNotes)
               }
             }
           }
@@ -228,6 +260,8 @@ class CutestarViewModel(application: Application) : AndroidViewModel(application
             mapOf("id" to it.id, "text" to it.text, "isChecked" to it.isChecked)
           },
           "reminder" to (note.reminder ?: ""),
+          "drawingUrl" to (note.drawingUrl ?: ""),
+          "imageUrl" to (note.imageUrl ?: ""),
           "createdAt" to FieldValue.serverTimestamp(),
           "updatedAt" to FieldValue.serverTimestamp(),
         )
@@ -246,7 +280,6 @@ class CutestarViewModel(application: Application) : AndroidViewModel(application
 
   fun uploadAvatar(imageUri: Uri, onResult: (Boolean, String?) -> Unit) {
     if (auth.currentUser == null) {
-      // Local profile photo
       _userProfile.update { it?.copy(customAvatarUrl = imageUri.toString()) }
       onResult(true, "Local avatar updated ★")
       return
@@ -277,7 +310,205 @@ class CutestarViewModel(application: Application) : AndroidViewModel(application
     }, viewModelScope)
   }
 
-  // Core Synchronization supporting text input and canvas drawing (Local Storage + Cloud)
+  // Unified save supporting text, drawing, photo attachment, checklist, reminders, and labels
+  fun saveFullNote(
+    noteId: String,
+    title: String,
+    content: String,
+    color: NoteColor,
+    isPinned: Boolean? = null,
+    isArchived: Boolean? = null,
+    strokes: List<DrawingStroke> = emptyList(),
+    existingDrawingUrl: String? = null,
+    photoUri: Uri? = null,
+    existingImageUrl: String? = null,
+    checklist: List<ChecklistItem> = emptyList(),
+    reminder: String? = null,
+    labels: List<String>? = null,
+    audioUrl: String? = null,
+    onComplete: (Boolean, String?) -> Unit = { _, _ -> },
+  ) {
+    val userId = auth.currentUser?.uid
+    val existingNote = _notes.value.firstOrNull { it.id == noteId }
+    val pinned = isPinned ?: existingNote?.isPinned ?: false
+    val archived = isArchived ?: existingNote?.isArchived ?: false
+    val finalLabels = labels ?: existingNote?.labels ?: emptyList()
+    val finalReminder = reminder ?: existingNote?.reminder
+    val finalAudioUrl = audioUrl ?: existingNote?.audioUrl
+
+    val optimisticNote = NoteItem(
+      id = noteId,
+      title = title,
+      content = content,
+      color = color,
+      isPinned = pinned,
+      isArchived = archived,
+      isDeleted = false,
+      labels = finalLabels,
+      checklist = checklist,
+      reminder = finalReminder,
+      drawingUrl = existingDrawingUrl,
+      imageUrl = existingImageUrl,
+      audioUrl = finalAudioUrl,
+      updatedAt = System.currentTimeMillis(),
+    )
+
+    _notes.update { list ->
+      val index = list.indexOfFirst { it.id == noteId }
+      if (index >= 0) {
+        list.toMutableList().apply { set(index, optimisticNote) }
+      } else {
+        listOf(optimisticNote) + list
+      }
+    }
+
+    viewModelScope.launch(Dispatchers.IO) {
+      _isSavingNote.value = true
+      try {
+        var localDrawingUrl = existingDrawingUrl
+        var localImageUrl = existingImageUrl
+
+        // Export strokes if new canvas drawing is created
+        if (strokes.isNotEmpty()) {
+          val bitmap = exportStrokesToBitmap(strokes, width = 800, height = 600)
+          localDrawingUrl = localStorage.saveDrawingBitmap(noteId, bitmap)
+        }
+
+        // Handle photo image attachment
+        if (photoUri != null) {
+          try {
+            val context = getApplication<Application>()
+            val input: InputStream? = context.contentResolver.openInputStream(photoUri)
+            val bitmap = BitmapFactory.decodeStream(input)
+            input?.close()
+            if (bitmap != null) {
+              localImageUrl = localStorage.saveImageBitmap(noteId, bitmap)
+            }
+          } catch (imgErr: Exception) {
+            Log.e("CutestarViewModel", "Error saving photo locally: ${imgErr.message}")
+          }
+        }
+
+        val updatedLocalNote = optimisticNote.copy(
+          drawingUrl = localDrawingUrl,
+          imageUrl = localImageUrl,
+        )
+
+        _notes.update { list ->
+          list.map { if (it.id == noteId) updatedLocalNote else it }
+        }
+        localStorage.saveNotes(_notes.value)
+
+        // Cloud sync if signed in
+        if (userId != null) {
+          val noteRef = db.collection("users").document(userId).collection("notes").document(noteId)
+          val snapshot = noteRef.get().await()
+
+          val payload = mutableMapOf<String, Any>(
+            "id" to noteId,
+            "userId" to userId,
+            "title" to title,
+            "content" to content,
+            "color" to color.name,
+            "isPinned" to pinned,
+            "isArchived" to archived,
+            "isDeleted" to false,
+            "labels" to finalLabels,
+            "checklist" to checklist.map {
+              mapOf("id" to it.id, "text" to it.text, "isChecked" to it.isChecked)
+            },
+            "updatedAt" to FieldValue.serverTimestamp(),
+          )
+
+          if (!snapshot.exists()) {
+            payload["createdAt"] = FieldValue.serverTimestamp()
+          }
+          if (finalReminder != null) payload["reminder"] = finalReminder
+          if (localDrawingUrl != null) payload["drawingUrl"] = localDrawingUrl
+          if (localImageUrl != null) payload["imageUrl"] = localImageUrl
+          if (finalAudioUrl != null) payload["audioUrl"] = finalAudioUrl
+
+          noteRef.set(payload, SetOptions.merge()).await()
+
+          // Upload drawing strokes to Firebase Storage if new
+          if (strokes.isNotEmpty()) {
+            try {
+              val bitmap = exportStrokesToBitmap(strokes, width = 800, height = 600)
+              val outStream = ByteArrayOutputStream()
+              bitmap.compress(Bitmap.CompressFormat.PNG, 95, outStream)
+              val bytes = outStream.toByteArray()
+              val storagePath = "users/$userId/notes/$noteId/drawing_${System.currentTimeMillis()}.png"
+              val storageRef = storage.reference.child(storagePath)
+              val downloadUrl = try {
+                storageRef.putBytes(bytes).await()
+                storageRef.downloadUrl.await().toString()
+              } catch (_: Exception) {
+                val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                "data:image/png;base64,$base64"
+              }
+              noteRef.update(
+                "drawingUrl", downloadUrl,
+                "drawingStoragePath", storagePath,
+                "updatedAt", FieldValue.serverTimestamp(),
+              ).await()
+              _notes.update { list ->
+                list.map { if (it.id == noteId) it.copy(drawingUrl = downloadUrl) else it }
+              }
+            } catch (drawErr: Exception) {
+              Log.w("CutestarViewModel", "Drawing cloud upload fallback: ${drawErr.message}")
+            }
+          }
+
+          // Upload photo to Firebase Storage if newly selected
+          if (photoUri != null) {
+            try {
+              val context = getApplication<Application>()
+              val input: InputStream? = context.contentResolver.openInputStream(photoUri)
+              val bitmap = BitmapFactory.decodeStream(input)
+              input?.close()
+              if (bitmap != null) {
+                val outStream = ByteArrayOutputStream()
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 85, outStream)
+                val bytes = outStream.toByteArray()
+                val storagePath = "users/$userId/notes/$noteId/image_${System.currentTimeMillis()}.jpg"
+                val storageRef = storage.reference.child(storagePath)
+                val downloadUrl = try {
+                  storageRef.putBytes(bytes).await()
+                  storageRef.downloadUrl.await().toString()
+                } catch (_: Exception) {
+                  val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                  "data:image/jpeg;base64,$base64"
+                }
+                noteRef.update(
+                  "imageUrl", downloadUrl,
+                  "imageStoragePath", storagePath,
+                  "updatedAt", FieldValue.serverTimestamp(),
+                ).await()
+                _notes.update { list ->
+                  list.map { if (it.id == noteId) it.copy(imageUrl = downloadUrl) else it }
+                }
+              }
+            } catch (photoErr: Exception) {
+              Log.w("CutestarViewModel", "Photo cloud upload fallback: ${photoErr.message}")
+            }
+          }
+        }
+
+        withContext(Dispatchers.Main) {
+          _isSavingNote.value = false
+          onComplete(true, "Saved & synchronized ★")
+        }
+      } catch (e: Exception) {
+        Log.e("CutestarViewModel", "Error saving note: ${e.message}", e)
+        withContext(Dispatchers.Main) {
+          _isSavingNote.value = false
+          onComplete(false, e.localizedMessage ?: "Sync error")
+        }
+      }
+    }
+  }
+
+  // Preserved backwards compatibility
   fun saveNoteWithDrawing(
     noteId: String,
     title: String,
@@ -288,154 +519,27 @@ class CutestarViewModel(application: Application) : AndroidViewModel(application
     checklist: List<ChecklistItem> = emptyList(),
     onComplete: (Boolean, String?) -> Unit,
   ) {
-    val userId = auth.currentUser?.uid
-    val existingNote = _notes.value.firstOrNull { it.id == noteId }
-    val isPinned = existingNote?.isPinned ?: false
-    val isArchived = existingNote?.isArchived ?: false
-
-    // Optimistic UI state update
-    val optimisticNote = NoteItem(
-      id = noteId,
+    saveFullNote(
+      noteId = noteId,
       title = title,
       content = content,
       color = color,
-      isPinned = isPinned,
-      isArchived = isArchived,
+      strokes = strokes,
+      existingDrawingUrl = existingDrawingUrl,
       checklist = checklist,
-      drawingUrl = existingDrawingUrl,
-      updatedAt = System.currentTimeMillis(),
+      onComplete = onComplete,
     )
-    _notes.update { list ->
-      val index = list.indexOfFirst { it.id == noteId }
-      if (index >= 0) {
-        list.toMutableList().apply { set(index, optimisticNote) }
-      } else {
-        listOf(optimisticNote) + list
-      }
-    }
-
-    if (userId == null) {
-      // Local Storage Mode: save directly to local disk/SharedPreferences without requiring account
-      viewModelScope.launch(Dispatchers.IO) {
-        _isSavingNote.value = true
-        try {
-          var localDrawingUrl = existingDrawingUrl
-          if (strokes.isNotEmpty()) {
-            val bitmap = exportStrokesToBitmap(strokes, width = 800, height = 600)
-            localDrawingUrl = localStorage.saveDrawingBitmap(noteId, bitmap)
-          }
-
-          val finalNote = optimisticNote.copy(drawingUrl = localDrawingUrl)
-          _notes.update { list ->
-            list.map { if (it.id == noteId) finalNote else it }
-          }
-          localStorage.saveNotes(_notes.value)
-
-          withContext(Dispatchers.Main) {
-            _isSavingNote.value = false
-            onComplete(true, "Note & drawing saved to device ★")
-          }
-        } catch (e: Exception) {
-          Log.e("CutestarViewModel", "Error saving note locally: ${e.message}", e)
-          withContext(Dispatchers.Main) {
-            _isSavingNote.value = false
-            onComplete(false, "Error saving note: ${e.message}")
-          }
-        }
-      }
-      return
-    }
-
-    viewModelScope.launch(Dispatchers.IO) {
-      _isSavingNote.value = true
-      try {
-        val noteRef = db.collection("users").document(userId).collection("notes").document(noteId)
-        val snapshot = noteRef.get().await()
-
-        val payload = mutableMapOf<String, Any>(
-          "id" to noteId,
-          "userId" to userId,
-          "title" to title,
-          "content" to content,
-          "color" to color.name,
-          "isPinned" to isPinned,
-          "isArchived" to isArchived,
-          "isDeleted" to false,
-          "labels" to (existingNote?.labels ?: emptyList<String>()),
-          "checklist" to (checklist.ifEmpty { existingNote?.checklist ?: emptyList() }).map {
-            mapOf("id" to it.id, "text" to it.text, "isChecked" to it.isChecked)
-          },
-          "updatedAt" to FieldValue.serverTimestamp(),
-        )
-
-        if (!snapshot.exists()) {
-          payload["createdAt"] = FieldValue.serverTimestamp()
-        }
-
-        if (existingDrawingUrl != null) {
-          payload["drawingUrl"] = existingDrawingUrl
-        }
-
-        // 1. Synchronize text content directly to Firestore
-        noteRef.set(payload, SetOptions.merge()).await()
-
-        // 2. Export canvas drawings on client side and asynchronously upload to Firebase Storage
-        if (strokes.isNotEmpty()) {
-          val bitmap = exportStrokesToBitmap(strokes, width = 800, height = 600)
-          val outputStream = ByteArrayOutputStream()
-          bitmap.compress(Bitmap.CompressFormat.PNG, 95, outputStream)
-          val bytes = outputStream.toByteArray()
-
-          val timestamp = System.currentTimeMillis()
-          val storagePath = "users/$userId/notes/$noteId/drawing_$timestamp.png"
-          val storageRef = storage.reference.child(storagePath)
-
-          val downloadUrl: String = try {
-            storageRef.putBytes(bytes).await()
-            storageRef.downloadUrl.await().toString()
-          } catch (storageErr: Exception) {
-            Log.w("CutestarViewModel", "Storage upload fallback: ${storageErr.message}")
-            val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
-            "data:image/png;base64,$base64"
-          }
-
-          // 3. Append storage download URL to current note document in Firestore
-          noteRef.update(
-            "drawingUrl", downloadUrl,
-            "drawingStoragePath", storagePath,
-            "updatedAt", FieldValue.serverTimestamp(),
-          ).await()
-
-          // Update local state with the uploaded drawing URL
-          _notes.update { list ->
-            list.map { if (it.id == noteId) it.copy(drawingUrl = downloadUrl) else it }
-          }
-        }
-
-        // Cache cloud state locally for offline readiness
-        localStorage.saveNotes(_notes.value)
-
-        withContext(Dispatchers.Main) {
-          _isSavingNote.value = false
-          onComplete(true, "Note & drawing synchronized ★")
-        }
-      } catch (e: Exception) {
-        Log.e("CutestarViewModel", "Error syncing note: ${e.message}", e)
-        withContext(Dispatchers.Main) {
-          _isSavingNote.value = false
-          onComplete(false, e.localizedMessage ?: "Sync error")
-        }
-      }
-    }
   }
 
-  // Filtered notes based on current destination and search query
+  // Filtered notes based on current destination, search query, type filter, and color filter
   val filteredNotes: StateFlow<List<NoteItem>> = combine(
     _notes,
     _currentDestination,
     _searchQuery,
-  ) { allNotes, destination, query ->
-    val baseList = when (destination) {
+    _selectedTypeFilter,
+    _selectedColorFilter,
+  ) { allNotes, destination, query, typeFilter, colorFilter ->
+    var baseList = when (destination) {
       is NavigationDestination.Notes -> allNotes.filter { !it.isArchived && !it.isDeleted }
       is NavigationDestination.Reminders -> allNotes.filter { it.reminder != null && !it.isDeleted }
       is NavigationDestination.Label -> allNotes.filter { it.labels.contains(destination.name) && !it.isDeleted }
@@ -444,6 +548,22 @@ class CutestarViewModel(application: Application) : AndroidViewModel(application
       is NavigationDestination.Settings -> emptyList()
     }
 
+    // Apply color filter
+    if (colorFilter != null) {
+      baseList = baseList.filter { it.color == colorFilter }
+    }
+
+    // Apply type filter
+    baseList = when (typeFilter) {
+      NoteTypeFilter.ALL -> baseList
+      NoteTypeFilter.NOTES -> baseList.filter { it.checklist.isEmpty() && it.drawingUrl.isNullOrBlank() && it.imageUrl.isNullOrBlank() }
+      NoteTypeFilter.LISTS -> baseList.filter { it.checklist.isNotEmpty() }
+      NoteTypeFilter.DRAWINGS -> baseList.filter { !it.drawingUrl.isNullOrBlank() }
+      NoteTypeFilter.IMAGES -> baseList.filter { !it.imageUrl.isNullOrBlank() }
+      NoteTypeFilter.REMINDERS -> baseList.filter { it.reminder != null }
+    }
+
+    // Apply search query
     if (query.isBlank()) {
       baseList
     } else {
@@ -471,30 +591,335 @@ class CutestarViewModel(application: Application) : AndroidViewModel(application
     _searchQuery.value = query
   }
 
+  fun setTypeFilter(filter: NoteTypeFilter) {
+    _selectedTypeFilter.value = filter
+  }
+
+  fun setColorFilter(color: NoteColor?) {
+    _selectedColorFilter.value = color
+  }
+
   fun setDestination(destination: NavigationDestination) {
     _currentDestination.value = destination
+    clearSelection()
   }
 
   fun togglePin(noteId: String) {
     _notes.update { list ->
       list.map { if (it.id == noteId) it.copy(isPinned = !it.isPinned) else it }
     }
-
-    val userId = auth.currentUser?.uid
-    if (userId == null) {
-      localStorage.saveNotes(_notes.value)
-      return
+    syncNoteUpdateToCloud(noteId) { note ->
+      mapOf("isPinned" to note.isPinned, "updatedAt" to FieldValue.serverTimestamp())
     }
+  }
 
+  fun toggleArchive(noteId: String) {
+    _notes.update { list ->
+      list.map { if (it.id == noteId) it.copy(isArchived = !it.isArchived) else it }
+    }
+    syncNoteUpdateToCloud(noteId) { note ->
+      mapOf("isArchived" to note.isArchived, "updatedAt" to FieldValue.serverTimestamp())
+    }
+  }
+
+  fun trashNote(noteId: String) {
+    _notes.update { list ->
+      list.map { if (it.id == noteId) it.copy(isDeleted = true, isPinned = false) else it }
+    }
+    syncNoteUpdateToCloud(noteId) { note ->
+      mapOf("isDeleted" to true, "isPinned" to false, "updatedAt" to FieldValue.serverTimestamp())
+    }
+  }
+
+  fun restoreNote(noteId: String) {
+    _notes.update { list ->
+      list.map { if (it.id == noteId) it.copy(isDeleted = false) else it }
+    }
+    syncNoteUpdateToCloud(noteId) { note ->
+      mapOf("isDeleted" to false, "updatedAt" to FieldValue.serverTimestamp())
+    }
+  }
+
+  fun deleteNotePermanently(noteId: String) {
+    _notes.update { list -> list.filterNot { it.id == noteId } }
+    localStorage.saveNotes(_notes.value)
+    val userId = auth.currentUser?.uid ?: return
     viewModelScope.launch(Dispatchers.IO) {
       try {
-        val current = _notes.value.firstOrNull { it.id == noteId }
-        if (current != null) {
-          db.collection("users").document(userId).collection("notes").document(noteId)
-            .update("isPinned", current.isPinned, "updatedAt", FieldValue.serverTimestamp())
+        db.collection("users").document(userId).collection("notes").document(noteId).delete().await()
+      } catch (e: Exception) {
+        Log.e("CutestarViewModel", "Error permanently deleting note: ${e.message}")
+      }
+    }
+  }
+
+  fun emptyTrash() {
+    val deletedIds = _notes.value.filter { it.isDeleted }.map { it.id }
+    _notes.update { list -> list.filterNot { it.isDeleted } }
+    localStorage.saveNotes(_notes.value)
+    val userId = auth.currentUser?.uid ?: return
+    viewModelScope.launch(Dispatchers.IO) {
+      deletedIds.forEach { id ->
+        try {
+          db.collection("users").document(userId).collection("notes").document(id).delete().await()
+        } catch (_: Exception) {}
+      }
+    }
+  }
+
+  fun toggleChecklistItem(noteId: String, itemId: String) {
+    _notes.update { list ->
+      list.map { note ->
+        if (note.id == noteId) {
+          val updatedChecklist = note.checklist.map { item ->
+            if (item.id == itemId) item.copy(isChecked = !item.isChecked) else item
+          }
+          note.copy(checklist = updatedChecklist)
+        } else {
+          note
+        }
+      }
+    }
+    syncNoteUpdateToCloud(noteId) { note ->
+      mapOf(
+        "checklist" to note.checklist.map {
+          mapOf("id" to it.id, "text" to it.text, "isChecked" to it.isChecked)
+        },
+        "updatedAt" to FieldValue.serverTimestamp(),
+      )
+    }
+  }
+
+  fun duplicateNote(noteId: String) {
+    val original = _notes.value.firstOrNull { it.id == noteId } ?: return
+    val newId = UUID.randomUUID().toString()
+    val copy = original.copy(
+      id = newId,
+      title = if (original.title.isNotBlank()) "Copy of ${original.title}" else "Copy",
+      isPinned = false,
+      updatedAt = System.currentTimeMillis(),
+    )
+    _notes.update { listOf(copy) + it }
+    localStorage.saveNotes(_notes.value)
+    val userId = auth.currentUser?.uid ?: return
+    viewModelScope.launch(Dispatchers.IO) {
+      try {
+        val payload = mapOf(
+          "id" to newId,
+          "userId" to userId,
+          "title" to copy.title,
+          "content" to copy.content,
+          "color" to copy.color.name,
+          "isPinned" to false,
+          "isArchived" to copy.isArchived,
+          "isDeleted" to false,
+          "labels" to copy.labels,
+          "checklist" to copy.checklist.map {
+            mapOf("id" to it.id, "text" to it.text, "isChecked" to it.isChecked)
+          },
+          "reminder" to (copy.reminder ?: ""),
+          "drawingUrl" to (copy.drawingUrl ?: ""),
+          "imageUrl" to (copy.imageUrl ?: ""),
+          "audioUrl" to (copy.audioUrl ?: ""),
+          "createdAt" to FieldValue.serverTimestamp(),
+          "updatedAt" to FieldValue.serverTimestamp(),
+        )
+        db.collection("users").document(userId).collection("notes").document(newId).set(payload).await()
+      } catch (e: Exception) {
+        Log.e("CutestarViewModel", "Error duplicating note in cloud: ${e.message}")
+      }
+    }
+  }
+
+  fun updateNoteReminder(noteId: String, reminder: String?) {
+    _notes.update { list ->
+      list.map { if (it.id == noteId) it.copy(reminder = reminder) else it }
+    }
+    syncNoteUpdateToCloud(noteId) {
+      val map = mutableMapOf<String, Any>("updatedAt" to FieldValue.serverTimestamp())
+      if (reminder != null) map["reminder"] = reminder
+      else map["reminder"] = FieldValue.delete()
+      map
+    }
+  }
+
+  fun updateNoteColor(noteId: String, color: NoteColor) {
+    _notes.update { list ->
+      list.map { if (it.id == noteId) it.copy(color = color) else it }
+    }
+    syncNoteUpdateToCloud(noteId) {
+      mapOf("color" to color.name, "updatedAt" to FieldValue.serverTimestamp())
+    }
+  }
+
+  fun updateNoteLabels(noteId: String, labels: List<String>) {
+    _notes.update { list ->
+      list.map { if (it.id == noteId) it.copy(labels = labels) else it }
+    }
+    syncNoteUpdateToCloud(noteId) {
+      mapOf("labels" to labels, "updatedAt" to FieldValue.serverTimestamp())
+    }
+  }
+
+  fun createLabel(name: String) {
+    val trimmed = name.trim()
+    if (trimmed.isNotEmpty() && !_labels.value.contains(trimmed)) {
+      _labels.update { it + trimmed }
+      localStorage.saveLabels(_labels.value)
+    }
+  }
+
+  fun renameLabel(oldName: String, newName: String) {
+    val trimmed = newName.trim()
+    if (trimmed.isEmpty() || trimmed == oldName) return
+
+    _labels.update { list -> list.map { if (it == oldName) trimmed else it } }
+    localStorage.saveLabels(_labels.value)
+
+    // Update all notes with oldName to newName
+    _notes.update { list ->
+      list.map { note ->
+        if (note.labels.contains(oldName)) {
+          val updatedLabels = note.labels.map { if (it == oldName) trimmed else it }
+          note.copy(labels = updatedLabels)
+        } else {
+          note
+        }
+      }
+    }
+    localStorage.saveNotes(_notes.value)
+
+    val userId = auth.currentUser?.uid ?: return
+    viewModelScope.launch(Dispatchers.IO) {
+      try {
+        _notes.value.filter { it.labels.contains(trimmed) }.forEach { note ->
+          db.collection("users").document(userId).collection("notes").document(note.id)
+            .update("labels", note.labels, "updatedAt", FieldValue.serverTimestamp()).await()
         }
       } catch (e: Exception) {
-        Log.w("CutestarViewModel", "Error updating pin in Firestore: ${e.message}")
+        Log.e("CutestarViewModel", "Error renaming label in cloud: ${e.message}")
+      }
+    }
+  }
+
+  fun deleteLabel(name: String) {
+    _labels.update { list -> list.filterNot { it == name } }
+    localStorage.saveLabels(_labels.value)
+
+    // Remove from all notes
+    _notes.update { list ->
+      list.map { note ->
+        if (note.labels.contains(name)) {
+          note.copy(labels = note.labels.filterNot { it == name })
+        } else {
+          note
+        }
+      }
+    }
+    localStorage.saveNotes(_notes.value)
+
+    val userId = auth.currentUser?.uid ?: return
+    viewModelScope.launch(Dispatchers.IO) {
+      try {
+        _notes.value.forEach { note ->
+          db.collection("users").document(userId).collection("notes").document(note.id)
+            .update("labels", note.labels, "updatedAt", FieldValue.serverTimestamp()).await()
+        }
+      } catch (e: Exception) {
+        Log.e("CutestarViewModel", "Error deleting label in cloud: ${e.message}")
+      }
+    }
+  }
+
+  // Multi-Selection Operations
+  fun toggleNoteSelection(noteId: String) {
+    _selectedNoteIds.update { set ->
+      if (set.contains(noteId)) set - noteId else set + noteId
+    }
+  }
+
+  fun selectAllVisibleNotes() {
+    _selectedNoteIds.value = filteredNotes.value.map { it.id }.toSet()
+  }
+
+  fun clearSelection() {
+    _selectedNoteIds.value = emptySet()
+  }
+
+  fun pinSelectedNotes() {
+    val selected = _selectedNoteIds.value
+    if (selected.isEmpty()) return
+    val allPinned = _notes.value.filter { selected.contains(it.id) }.all { it.isPinned }
+    val newPinState = !allPinned
+    _notes.update { list ->
+      list.map { if (selected.contains(it.id)) it.copy(isPinned = newPinState) else it }
+    }
+    selected.forEach { noteId ->
+      syncNoteUpdateToCloud(noteId) {
+        mapOf("isPinned" to newPinState, "updatedAt" to FieldValue.serverTimestamp())
+      }
+    }
+    clearSelection()
+  }
+
+  fun archiveSelectedNotes() {
+    val selected = _selectedNoteIds.value
+    if (selected.isEmpty()) return
+    val isArchiveDestination = _currentDestination.value is NavigationDestination.Archive
+    val newArchiveState = !isArchiveDestination
+    _notes.update { list ->
+      list.map { if (selected.contains(it.id)) it.copy(isArchived = newArchiveState) else it }
+    }
+    selected.forEach { noteId ->
+      syncNoteUpdateToCloud(noteId) {
+        mapOf("isArchived" to newArchiveState, "updatedAt" to FieldValue.serverTimestamp())
+      }
+    }
+    clearSelection()
+  }
+
+  fun trashSelectedNotes() {
+    val selected = _selectedNoteIds.value
+    if (selected.isEmpty()) return
+    _notes.update { list ->
+      list.map { if (selected.contains(it.id)) it.copy(isDeleted = true, isPinned = false) else it }
+    }
+    selected.forEach { noteId ->
+      syncNoteUpdateToCloud(noteId) {
+        mapOf("isDeleted" to true, "isPinned" to false, "updatedAt" to FieldValue.serverTimestamp())
+      }
+    }
+    clearSelection()
+  }
+
+  fun setColorForSelectedNotes(color: NoteColor) {
+    val selected = _selectedNoteIds.value
+    if (selected.isEmpty()) return
+    _notes.update { list ->
+      list.map { if (selected.contains(it.id)) it.copy(color = color) else it }
+    }
+    selected.forEach { noteId ->
+      syncNoteUpdateToCloud(noteId) {
+        mapOf("color" to color.name, "updatedAt" to FieldValue.serverTimestamp())
+      }
+    }
+    clearSelection()
+  }
+
+  fun toggleMoveCheckedToBottom(value: Boolean) {
+    _moveCheckedToBottom.value = value
+  }
+
+  private fun syncNoteUpdateToCloud(noteId: String, payloadBuilder: (NoteItem) -> Map<String, Any>) {
+    localStorage.saveNotes(_notes.value)
+    val userId = auth.currentUser?.uid ?: return
+    val current = _notes.value.firstOrNull { it.id == noteId } ?: return
+    viewModelScope.launch(Dispatchers.IO) {
+      try {
+        db.collection("users").document(userId).collection("notes").document(noteId)
+          .set(payloadBuilder(current), SetOptions.merge()).await()
+      } catch (e: Exception) {
+        Log.w("CutestarViewModel", "Error syncing update to cloud: ${e.message}")
       }
     }
   }
@@ -505,25 +930,13 @@ class CutestarViewModel(application: Application) : AndroidViewModel(application
     color: NoteColor = NoteColor.DEFAULT,
     checklist: List<ChecklistItem> = emptyList(),
   ) {
-    saveNoteWithDrawing(
+    saveFullNote(
       noteId = UUID.randomUUID().toString(),
       title = title,
       content = content,
       color = color,
-      strokes = emptyList(),
-      existingDrawingUrl = null,
       checklist = checklist,
       onComplete = { _, _ -> },
     )
-  }
-
-  fun createLabel(name: String) {
-    val trimmed = name.trim()
-    if (trimmed.isNotEmpty() && !_labels.value.contains(trimmed)) {
-      _labels.update { it + trimmed }
-      if (auth.currentUser == null) {
-        localStorage.saveLabels(_labels.value)
-      }
-    }
   }
 }

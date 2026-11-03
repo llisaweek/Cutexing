@@ -87,6 +87,19 @@ class LocalNotesStorage(private val context: Context) {
     return Uri.fromFile(drawingFile).toString()
   }
 
+  fun saveImageBitmap(noteId: String, bitmap: Bitmap): String {
+    val imagesDir = File(context.filesDir, "images")
+    if (!imagesDir.exists()) {
+      imagesDir.mkdirs()
+    }
+    val imageFile = File(imagesDir, "image_${noteId}_${System.currentTimeMillis()}.jpg")
+    FileOutputStream(imageFile).use { out ->
+      bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
+      out.flush()
+    }
+    return Uri.fromFile(imageFile).toString()
+  }
+
   private fun serializeNote(note: NoteItem): JSONObject {
     val obj = JSONObject()
     obj.put("id", note.id)
@@ -99,6 +112,9 @@ class LocalNotesStorage(private val context: Context) {
     obj.put("reminder", note.reminder ?: "")
     obj.put("drawingUrl", note.drawingUrl ?: "")
     obj.put("drawingStoragePath", note.drawingStoragePath ?: "")
+    obj.put("imageUrl", note.imageUrl ?: "")
+    obj.put("imageStoragePath", note.imageStoragePath ?: "")
+    obj.put("audioUrl", note.audioUrl ?: "")
     obj.put("updatedAt", note.updatedAt)
 
     val labelsArray = JSONArray()
@@ -152,6 +168,9 @@ class LocalNotesStorage(private val context: Context) {
     val reminder = obj.optString("reminder", "").ifBlank { null }
     val drawingUrl = obj.optString("drawingUrl", "").ifBlank { null }
     val drawingStoragePath = obj.optString("drawingStoragePath", "").ifBlank { null }
+    val imageUrl = obj.optString("imageUrl", "").ifBlank { null }
+    val imageStoragePath = obj.optString("imageStoragePath", "").ifBlank { null }
+    val audioUrl = obj.optString("audioUrl", "").ifBlank { null }
 
     return NoteItem(
       id = obj.optString("id", java.util.UUID.randomUUID().toString()),
@@ -166,6 +185,9 @@ class LocalNotesStorage(private val context: Context) {
       reminder = reminder,
       drawingUrl = drawingUrl,
       drawingStoragePath = drawingStoragePath,
+      imageUrl = imageUrl,
+      imageStoragePath = imageStoragePath,
+      audioUrl = audioUrl,
       updatedAt = obj.optLong("updatedAt", System.currentTimeMillis()),
     )
   }

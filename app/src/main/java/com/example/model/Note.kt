@@ -104,6 +104,9 @@ data class NoteItem(
   val reminder: String? = null,
   val drawingUrl: String? = null,
   val drawingStoragePath: String? = null,
+  val imageUrl: String? = null,
+  val imageStoragePath: String? = null,
+  val audioUrl: String? = null,
   val updatedAt: Long = System.currentTimeMillis(),
 )
 

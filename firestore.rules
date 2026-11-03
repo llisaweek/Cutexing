@@ -35,6 +35,9 @@ service cloud.firestore {
         (!('reminder' in data) || data.reminder is string) &&
         (!('drawingUrl' in data) || data.drawingUrl is string) &&
         (!('drawingStoragePath' in data) || data.drawingStoragePath is string) &&
+        (!('imageUrl' in data) || data.imageUrl is string) &&
+        (!('imageStoragePath' in data) || data.imageStoragePath is string) &&
+        (!('audioUrl' in data) || data.audioUrl is string) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
     }

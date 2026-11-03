@@ -60,6 +60,8 @@ fun NavigationDrawerContent(
   labels: List<String>,
   onSelectDestination: (NavigationDestination) -> Unit,
   onCreateLabel: () -> Unit,
+  onEditLabels: () -> Unit = {},
+  onSettingsClick: () -> Unit = {},
   userProfile: UserProfile? = null,
   onProfileClick: () -> Unit = {},
   modifier: Modifier = Modifier,
@@ -192,7 +194,7 @@ fun NavigationDrawerContent(
           modifier = Modifier.weight(1f),
         )
         TextButton(
-          onClick = onCreateLabel,
+          onClick = onEditLabels,
           modifier = Modifier.testTag("edit_labels_button"),
         ) {
           Text(
@@ -312,7 +314,7 @@ fun NavigationDrawerContent(
           )
         },
         selected = currentDestination is NavigationDestination.Settings,
-        onClick = { onSelectDestination(NavigationDestination.Settings) },
+        onClick = onSettingsClick,
         modifier = Modifier
           .padding(NavigationDrawerItemDefaults.ItemPadding)
           .testTag("nav_item_settings"),

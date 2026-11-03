@@ -85,4 +85,36 @@ class ExampleRobolectricTest {
     assertEquals("Saved locally", loaded[0].content)
     assertEquals("file:///data/local.png", loaded[0].drawingUrl)
   }
+
+  @Test
+  fun `local storage preserves checklist items and labels`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val storage = com.example.data.LocalNotesStorage(context)
+    val testNotes = listOf(
+      NoteItem(
+        id = "local-checklist",
+        title = "Tasks",
+        content = "",
+        color = NoteColor.SAND,
+        labels = listOf("Work", "Sprint"),
+        checklist = listOf(
+          com.example.model.ChecklistItem("c1", "Design mockups", true),
+          com.example.model.ChecklistItem("c2", "Implement Keep layout", false),
+        ),
+        reminder = "Tomorrow, 9:00 AM",
+        isPinned = true,
+        isArchived = false,
+      )
+    )
+    storage.saveNotes(testNotes)
+    val loaded = storage.loadNotes()
+    assertEquals(1, loaded.size)
+    assertEquals(2, loaded[0].checklist.size)
+    assertEquals(true, loaded[0].checklist[0].isChecked)
+    assertEquals("Design mockups", loaded[0].checklist[0].text)
+    assertEquals(false, loaded[0].checklist[1].isChecked)
+    assertEquals("Tomorrow, 9:00 AM", loaded[0].reminder)
+    assertEquals(listOf("Work", "Sprint"), loaded[0].labels)
+    assertEquals(true, loaded[0].isPinned)
+  }
 }
