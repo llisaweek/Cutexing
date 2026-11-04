@@ -108,11 +108,14 @@ data class NoteItem(
   val imageStoragePath: String? = null,
   val audioUrl: String? = null,
   val updatedAt: Long = System.currentTimeMillis(),
+  val calendarDate: Long? = null,
+  val alarmTime: Long? = null,
 )
 
 sealed interface NavigationDestination {
   data object Notes : NavigationDestination
   data object Reminders : NavigationDestination
+  data object Calendar : NavigationDestination
   data class Label(val name: String) : NavigationDestination
   data object Archive : NavigationDestination
   data object Trash : NavigationDestination
@@ -122,4 +125,11 @@ sealed interface NavigationDestination {
 enum class LayoutMode {
   STAGGERED_GRID,
   SINGLE_COLUMN,
+}
+
+enum class NoteSortOrder(val displayName: String) {
+  MODIFIED_DESC("Newest updated"),
+  MODIFIED_ASC("Oldest updated"),
+  TITLE_ASC("Title (A-Z)"),
+  COLOR("Color"),
 }

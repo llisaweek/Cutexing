@@ -19,7 +19,9 @@ import com.example.model.LayoutMode
 import com.example.model.NavigationDestination
 import com.example.model.NoteColor
 import com.example.model.NoteItem
+import com.example.model.NoteSortOrder
 import com.example.model.UserProfile
+import com.example.ui.components.CanvasBounds
 import com.example.ui.components.DrawingStroke
 import com.example.ui.components.exportStrokesToBitmap
 import com.google.firebase.Firebase
@@ -110,6 +112,9 @@ class CutestarViewModel(application: Application) : AndroidViewModel(application
 
   private val _selectedColorFilter = MutableStateFlow<NoteColor?>(null)
   val selectedColorFilter: StateFlow<NoteColor?> = _selectedColorFilter
+
+  private val _sortOrder = MutableStateFlow(NoteSortOrder.MODIFIED_DESC)
+  val sortOrder: StateFlow<NoteSortOrder> = _sortOrder.asStateFlow()
 
   private val _layoutMode = MutableStateFlow(LayoutMode.STAGGERED_GRID)
   val layoutMode: StateFlow<LayoutMode> = _layoutMode
@@ -508,6 +513,125 @@ class CutestarViewModel(application: Application) : AndroidViewModel(application
     }
   }
 
+  fun saveDrawingNote(
+    noteId: String,
+    title: String,
+    strokes: List<DrawingStroke>,
+    color: NoteColor = NoteColor.DEFAULT,
+    canvasBounds: CanvasBounds,
+    onComplete: (Boolean, String?) -> Unit = { _, _ -> },
+  ) {
+    val userId = auth.currentUser?.uid
+    val existingNote = _notes.value.firstOrNull { it.id == noteId }
+    val pinned = existingNote?.isPinned ?: false
+    val archived = existingNote?.isArchived ?: false
+    val finalLabels = existingNote?.labels ?: emptyList()
+    val finalTitle = title.ifBlank { "Drawing" }
+
+    val optimisticNote = NoteItem(
+      id = noteId,
+      title = finalTitle,
+      content = "",
+      color = color,
+      isPinned = pinned,
+      isArchived = archived,
+      isDeleted = false,
+      labels = finalLabels,
+      drawingUrl = existingNote?.drawingUrl,
+      updatedAt = System.currentTimeMillis(),
+    )
+
+    _notes.update { list ->
+      val index = list.indexOfFirst { it.id == noteId }
+      if (index >= 0) {
+        list.toMutableList().apply { set(index, optimisticNote) }
+      } else {
+        listOf(optimisticNote) + list
+      }
+    }
+
+    viewModelScope.launch(Dispatchers.IO) {
+      _isSavingNote.value = true
+      try {
+        var localDrawingUrl = existingNote?.drawingUrl
+        if (strokes.isNotEmpty()) {
+          val bitmap = exportStrokesToBitmap(
+            strokes = strokes,
+            canvasLeft = canvasBounds.left,
+            canvasTop = canvasBounds.top,
+            canvasRight = canvasBounds.right,
+            canvasBottom = canvasBounds.bottom,
+          )
+          localDrawingUrl = localStorage.saveDrawingBitmap(noteId, bitmap)
+        }
+
+        val updatedLocalNote = optimisticNote.copy(drawingUrl = localDrawingUrl)
+        _notes.update { list ->
+          list.map { if (it.id == noteId) updatedLocalNote else it }
+        }
+        localStorage.saveNotes(_notes.value)
+
+        // Cloud sync if signed in
+        if (userId != null && localDrawingUrl != null && strokes.isNotEmpty()) {
+          try {
+            val bitmap = exportStrokesToBitmap(
+              strokes = strokes,
+              canvasLeft = canvasBounds.left,
+              canvasTop = canvasBounds.top,
+              canvasRight = canvasBounds.right,
+              canvasBottom = canvasBounds.bottom,
+            )
+            val outStream = ByteArrayOutputStream()
+            bitmap.compress(Bitmap.CompressFormat.PNG, 95, outStream)
+            val bytes = outStream.toByteArray()
+            val storagePath = "users/$userId/notes/$noteId/drawing_${System.currentTimeMillis()}.png"
+            val storageRef = storage.reference.child(storagePath)
+            val downloadUrl = try {
+              storageRef.putBytes(bytes).await()
+              storageRef.downloadUrl.await().toString()
+            } catch (_: Exception) {
+              val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+              "data:image/png;base64,$base64"
+            }
+
+            val noteRef = db.collection("users").document(userId).collection("notes").document(noteId)
+            val payload = mapOf(
+              "id" to noteId,
+              "userId" to userId,
+              "title" to finalTitle,
+              "content" to "",
+              "color" to color.name,
+              "isPinned" to pinned,
+              "isArchived" to archived,
+              "isDeleted" to false,
+              "labels" to finalLabels,
+              "drawingUrl" to downloadUrl,
+              "drawingStoragePath" to storagePath,
+              "updatedAt" to FieldValue.serverTimestamp(),
+            )
+            noteRef.set(payload, SetOptions.merge()).await()
+            _notes.update { list ->
+              list.map { if (it.id == noteId) it.copy(drawingUrl = downloadUrl) else it }
+            }
+          } catch (cloudErr: Exception) {
+            Log.w("CutestarViewModel", "Drawing cloud sync fallback: ${cloudErr.message}")
+          }
+        }
+
+        withContext(Dispatchers.Main) {
+          _isSavingNote.value = false
+          onComplete(true, "Drawing saved ★")
+        }
+      } catch (e: Exception) {
+        Log.e("CutestarViewModel", "Error saving drawing note: ${e.message}", e)
+        withContext(Dispatchers.Main) {
+          _isSavingNote.value = false
+          onComplete(false, "Failed to save drawing")
+        }
+      }
+    }
+  }
+
   // Preserved backwards compatibility
   fun saveNoteWithDrawing(
     noteId: String,
@@ -531,14 +655,23 @@ class CutestarViewModel(application: Application) : AndroidViewModel(application
     )
   }
 
-  // Filtered notes based on current destination, search query, type filter, and color filter
+  // Filtered and sorted notes based on destination, search query, type filter, color filter, and sort order
   val filteredNotes: StateFlow<List<NoteItem>> = combine(
     _notes,
     _currentDestination,
     _searchQuery,
     _selectedTypeFilter,
     _selectedColorFilter,
-  ) { allNotes, destination, query, typeFilter, colorFilter ->
+    _sortOrder,
+  ) { args: Array<Any?> ->
+    @Suppress("UNCHECKED_CAST")
+    val allNotes = args[0] as List<NoteItem>
+    val destination = args[1] as NavigationDestination
+    val query = args[2] as String
+    val typeFilter = args[3] as NoteTypeFilter
+    val colorFilter = args[4] as NoteColor?
+    val sort = args[5] as NoteSortOrder
+
     var baseList = when (destination) {
       is NavigationDestination.Notes -> allNotes.filter { !it.isArchived && !it.isDeleted }
       is NavigationDestination.Reminders -> allNotes.filter { it.reminder != null && !it.isDeleted }
@@ -564,16 +697,22 @@ class CutestarViewModel(application: Application) : AndroidViewModel(application
     }
 
     // Apply search query
-    if (query.isBlank()) {
-      baseList
-    } else {
+    if (query.isNotBlank()) {
       val trimmed = query.trim().lowercase()
-      baseList.filter { note ->
+      baseList = baseList.filter { note ->
         note.title.lowercase().contains(trimmed) ||
           note.content.lowercase().contains(trimmed) ||
           note.labels.any { it.lowercase().contains(trimmed) } ||
           note.checklist.any { it.text.lowercase().contains(trimmed) }
       }
+    }
+
+    // Apply sort order
+    when (sort) {
+      NoteSortOrder.MODIFIED_DESC -> baseList.sortedByDescending { it.updatedAt }
+      NoteSortOrder.MODIFIED_ASC -> baseList.sortedBy { it.updatedAt }
+      NoteSortOrder.TITLE_ASC -> baseList.sortedBy { it.title.ifBlank { it.content }.lowercase() }
+      NoteSortOrder.COLOR -> baseList.sortedBy { it.color.name }
     }
   }.stateIn(
     scope = viewModelScope,
@@ -597,6 +736,10 @@ class CutestarViewModel(application: Application) : AndroidViewModel(application
 
   fun setColorFilter(color: NoteColor?) {
     _selectedColorFilter.value = color
+  }
+
+  fun setSortOrder(order: NoteSortOrder) {
+    _sortOrder.value = order
   }
 
   fun setDestination(destination: NavigationDestination) {

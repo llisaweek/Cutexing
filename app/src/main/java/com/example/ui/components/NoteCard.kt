@@ -4,6 +4,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -64,6 +65,7 @@ fun NoteCard(
   onClick: () -> Unit,
   onLongClick: () -> Unit = {},
   onTogglePin: () -> Unit,
+  onDrawingClick: (() -> Unit)? = null,
   onToggleChecklistItem: ((noteId: String, itemId: String) -> Unit)? = null,
   modifier: Modifier = Modifier,
 ) {
@@ -128,7 +130,8 @@ fun NoteCard(
             .fillMaxWidth()
             .height(120.dp)
             .clip(RoundedCornerShape(12.dp))
-            .border(0.5.dp, note.color.lightBorder, RoundedCornerShape(12.dp)),
+            .border(0.5.dp, note.color.lightBorder, RoundedCornerShape(12.dp))
+            .clickable(enabled = onDrawingClick != null) { onDrawingClick?.invoke() },
           contentScale = ContentScale.Crop,
           loading = {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -207,6 +210,33 @@ fun NoteCard(
       // Interactive Checklist items (Google Keep signature: direct toggle from card!)
       if (note.checklist.isNotEmpty()) {
         Spacer(modifier = Modifier.height(8.dp))
+        val completedCount = note.checklist.count { it.isChecked }
+        val totalCount = note.checklist.size
+        val progress = if (totalCount > 0) completedCount.toFloat() / totalCount.toFloat() else 0f
+
+        // Cute mini checklist progress bar
+        Row(
+          modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+          androidx.compose.material3.LinearProgressIndicator(
+            progress = { progress },
+            modifier = Modifier
+              .weight(1f)
+              .height(4.dp)
+              .clip(RoundedCornerShape(2.dp)),
+            color = CutestarPrimary,
+            trackColor = note.color.lightBorder.copy(alpha = 0.5f),
+          )
+          Spacer(modifier = Modifier.width(8.dp))
+          Text(
+            text = "$completedCount/$totalCount",
+            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold),
+            color = if (completedCount == totalCount) CutestarPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+          )
+        }
+
         note.checklist.take(5).forEach { item ->
           Row(
             modifier = Modifier

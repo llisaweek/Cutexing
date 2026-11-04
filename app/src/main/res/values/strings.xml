@@ -1,3 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Cutestar</string>
     <string name="search_notes">Search your notes</string>
@@ -11,6 +12,7 @@
     <string name="new_photo">New photo note</string>
     <string name="nav_notes">Notes</string>
     <string name="nav_reminders">Reminders</string>
+    <string name="nav_calendar">Calendar</string>
     <string name="nav_archive">Archive</string>
     <string name="nav_trash">Trash</string>
     <string name="nav_settings">Settings</string>
@@ -20,4 +22,15 @@
     <string name="section_others">OTHERS</string>
     <string name="empty_notes_title">Notes you add appear here</string>
     <string name="empty_notes_subtitle">Capture thoughts, lists, and ideas in a flash</string>
+    <string name="calendar_title">Calendar</string>
+    <string name="no_notes_for_date">No notes for this date</string>
+    <string name="add_note_for_date">Add note for this date</string>
+    <string name="alarm_set">Alarm scheduled</string>
+    <string name="alarm_notification_title">Note Reminder</string>
+    <string name="language_setting">Language</string>
+    <string name="export_text">Export as Text (.txt)</string>
+    <string name="export_image">Export as Image (.png)</string>
+    <string name="import_notes">Import Notes</string>
+    <string name="import_text">Import from Text file</string>
+    <string name="import_image">Import from Image</string>
 </resources>

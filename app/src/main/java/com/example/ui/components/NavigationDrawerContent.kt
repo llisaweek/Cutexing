@@ -16,12 +16,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Archive
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Label
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Archive
+import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.Label
@@ -168,6 +170,30 @@ fun NavigationDrawerContent(
         modifier = Modifier
           .padding(NavigationDrawerItemDefaults.ItemPadding)
           .testTag("nav_item_reminders"),
+        colors = NavigationDrawerItemDefaults.colors(
+          selectedContainerColor = CutestarPrimary.copy(alpha = 0.15f),
+          selectedIconColor = CutestarPrimary,
+          selectedTextColor = CutestarPrimary,
+        ),
+      )
+
+      NavigationDrawerItem(
+        label = { Text(stringResource(R.string.nav_calendar)) },
+        icon = {
+          Icon(
+            imageVector = if (currentDestination is NavigationDestination.Calendar) {
+              Icons.Filled.CalendarMonth
+            } else {
+              Icons.Outlined.CalendarMonth
+            },
+            contentDescription = stringResource(R.string.nav_calendar),
+          )
+        },
+        selected = currentDestination is NavigationDestination.Calendar,
+        onClick = { onSelectDestination(NavigationDestination.Calendar) },
+        modifier = Modifier
+          .padding(NavigationDrawerItemDefaults.ItemPadding)
+          .testTag("nav_item_calendar"),
         colors = NavigationDrawerItemDefaults.colors(
           selectedContainerColor = CutestarPrimary.copy(alpha = 0.15f),
           selectedIconColor = CutestarPrimary,

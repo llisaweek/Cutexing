@@ -85,6 +85,7 @@ import com.example.model.NavigationDestination
 import com.example.model.NoteColor
 import com.example.model.NoteItem
 import com.example.ui.components.BottomQuickBar
+import com.example.ui.components.DrawingEditorDialog
 import com.example.ui.components.EditLabelsDialog
 import com.example.ui.components.NavigationDrawerContent
 import com.example.ui.components.NoteCard
@@ -116,6 +117,7 @@ fun CutestarScreen(
   val selectedTypeFilter by viewModel.selectedTypeFilter.collectAsStateWithLifecycle()
   val selectedColorFilter by viewModel.selectedColorFilter.collectAsStateWithLifecycle()
   val layoutMode by viewModel.layoutMode.collectAsStateWithLifecycle()
+  val sortOrder by viewModel.sortOrder.collectAsStateWithLifecycle()
   val selectedNoteIds by viewModel.selectedNoteIds.collectAsStateWithLifecycle()
   val moveCheckedToBottom by viewModel.moveCheckedToBottom.collectAsStateWithLifecycle()
   val userProfile by viewModel.userProfile.collectAsStateWithLifecycle()
@@ -134,8 +136,9 @@ fun CutestarScreen(
   var trashActionTargetNote by remember { mutableStateOf<NoteItem?>(null) }
 
   var editingNote by remember { mutableStateOf<NoteItem?>(null) }
-  var startWithDrawing by remember { mutableStateOf(false) }
   var startWithChecklist by remember { mutableStateOf(false) }
+  var showDrawingEditor by remember { mutableStateOf(false) }
+  var editingDrawingNote by remember { mutableStateOf<NoteItem?>(null) }
 
   // Zero-permission Photo Picker for bottom bar
   val bottomBarPhotoPicker = rememberLauncherForActivityResult(
@@ -143,7 +146,6 @@ fun CutestarScreen(
   ) { uri ->
     if (uri != null) {
       editingNote = null
-      startWithDrawing = false
       startWithChecklist = false
       showNoteEditor = true
     }
@@ -202,21 +204,17 @@ fun CutestarScreen(
           BottomQuickBar(
             onTakeNote = {
               editingNote = null
-              startWithDrawing = false
               startWithChecklist = false
               showNoteEditor = true
             },
             onNewList = {
               editingNote = null
-              startWithDrawing = false
               startWithChecklist = true
               showNoteEditor = true
             },
             onNewDrawing = {
-              editingNote = null
-              startWithDrawing = true
-              startWithChecklist = false
-              showNoteEditor = true
+              editingDrawingNote = null
+              showDrawingEditor = true
             },
             onNewAudio = {
               showVoiceNoteDialog = true
@@ -247,6 +245,8 @@ fun CutestarScreen(
             layoutMode = layoutMode,
             onToggleLayoutMode = { viewModel.toggleLayoutMode() },
             onOpenDrawer = { scope.launch { drawerState.open() } },
+            sortOrder = sortOrder,
+            onSortOrderChange = { viewModel.setSortOrder(it) },
             selectedCount = selectedNoteIds.size,
             onClearSelection = { viewModel.clearSelection() },
             onPinSelected = { viewModel.pinSelectedNotes() },
@@ -359,6 +359,20 @@ fun CutestarScreen(
           EmptyNotesState(
             destination = currentDestination,
             hasSearchQuery = searchQuery.isNotEmpty(),
+            onNewNote = {
+              editingNote = null
+              startWithChecklist = false
+              showNoteEditor = true
+            },
+            onNewList = {
+              editingNote = null
+              startWithChecklist = true
+              showNoteEditor = true
+            },
+            onNewDrawing = {
+              editingDrawingNote = null
+              showDrawingEditor = true
+            },
           )
         } else {
           val columns = if (layoutMode == LayoutMode.STAGGERED_GRID) 2 else 1
@@ -386,15 +400,21 @@ fun CutestarScreen(
                   onClick = {
                     if (selectedNoteIds.isNotEmpty()) {
                       viewModel.toggleNoteSelection(note.id)
+                    } else if (!note.drawingUrl.isNullOrBlank() && note.content.isBlank() && note.checklist.isEmpty()) {
+                      editingDrawingNote = note
+                      showDrawingEditor = true
                     } else {
                       editingNote = note
-                      startWithDrawing = false
                       startWithChecklist = false
                       showNoteEditor = true
                     }
                   },
                   onLongClick = { viewModel.toggleNoteSelection(note.id) },
                   onTogglePin = { viewModel.togglePin(note.id) },
+                  onDrawingClick = {
+                    editingDrawingNote = note
+                    showDrawingEditor = true
+                  },
                   onToggleChecklistItem = { noteId, itemId ->
                     viewModel.toggleChecklistItem(noteId, itemId)
                   },
@@ -419,15 +439,21 @@ fun CutestarScreen(
                       viewModel.toggleNoteSelection(note.id)
                     } else if (currentDestination is NavigationDestination.Trash) {
                       trashActionTargetNote = note
+                    } else if (!note.drawingUrl.isNullOrBlank() && note.content.isBlank() && note.checklist.isEmpty()) {
+                      editingDrawingNote = note
+                      showDrawingEditor = true
                     } else {
                       editingNote = note
-                      startWithDrawing = false
                       startWithChecklist = false
                       showNoteEditor = true
                     }
                   },
                   onLongClick = { viewModel.toggleNoteSelection(note.id) },
                   onTogglePin = { viewModel.togglePin(note.id) },
+                  onDrawingClick = {
+                    editingDrawingNote = note
+                    showDrawingEditor = true
+                  },
                   onToggleChecklistItem = { noteId, itemId ->
                     viewModel.toggleChecklistItem(noteId, itemId)
                   },
@@ -467,16 +493,15 @@ fun CutestarScreen(
     )
   }
 
-  // Note Editor Dialog with full Google Keep capabilities
+  // Text Note Editor Dialog (dedicated to text and checklist input)
   if (showNoteEditor) {
     NoteEditorDialog(
       initialNote = editingNote,
-      startWithDrawing = startWithDrawing,
       startWithChecklist = startWithChecklist,
       allLabels = labels,
       isSaving = isSavingNote,
       onCreateLabel = { viewModel.createLabel(it) },
-      onSave = { noteId, title, content, color, isPinned, isArchived, strokes, existingDrawingUrl, photoUri, existingImageUrl, checklist, reminder, assignedLabels ->
+      onSave = { noteId, title, content, color, isPinned, isArchived, photoUri, existingImageUrl, checklist, reminder, assignedLabels ->
         viewModel.saveFullNote(
           noteId = noteId,
           title = title,
@@ -484,8 +509,6 @@ fun CutestarScreen(
           color = color,
           isPinned = isPinned,
           isArchived = isArchived,
-          strokes = strokes,
-          existingDrawingUrl = existingDrawingUrl,
           photoUri = photoUri,
           existingImageUrl = existingImageUrl,
           checklist = checklist,
@@ -519,6 +542,44 @@ fun CutestarScreen(
       onDismiss = {
         showNoteEditor = false
         editingNote = null
+      },
+    )
+  }
+
+  // Dedicated Image Drawing Editor Dialog (separated image-drawing functionality)
+  if (showDrawingEditor) {
+    DrawingEditorDialog(
+      initialNote = editingDrawingNote,
+      isSaving = isSavingNote,
+      onSave = { noteId, title, strokes, color, canvasBounds ->
+        viewModel.saveDrawingNote(
+          noteId = noteId,
+          title = title,
+          strokes = strokes,
+          color = color,
+          canvasBounds = canvasBounds,
+          onComplete = { success, message ->
+            if (success) {
+              showDrawingEditor = false
+              editingDrawingNote = null
+            }
+            scope.launch {
+              snackbarHostState.showSnackbar(
+                message ?: if (success) "Drawing saved ★" else "Failed to save drawing"
+              )
+            }
+          },
+        )
+      },
+      onDelete = { noteId ->
+        viewModel.trashNote(noteId)
+        showDrawingEditor = false
+        editingDrawingNote = null
+        scope.launch { snackbarHostState.showSnackbar("Drawing moved to trash") }
+      },
+      onDismiss = {
+        showDrawingEditor = false
+        editingDrawingNote = null
       },
     )
   }
@@ -678,58 +739,109 @@ private fun SectionHeader(title: String) {
 private fun EmptyNotesState(
   destination: NavigationDestination,
   hasSearchQuery: Boolean,
+  onNewNote: () -> Unit = {},
+  onNewList: () -> Unit = {},
+  onNewDrawing: () -> Unit = {},
 ) {
   val title = if (hasSearchQuery) {
     "No matching notes found"
   } else {
     when (destination) {
-      is NavigationDestination.Notes -> stringResource(R.string.empty_notes_title)
-      is NavigationDestination.Reminders -> "Notes with upcoming reminders appear here"
+      is NavigationDestination.Notes -> "Capture your thoughts ★"
+      is NavigationDestination.Reminders -> "No upcoming reminders"
       is NavigationDestination.Label -> "No notes with this label yet"
-      is NavigationDestination.Archive -> "Your archived notes appear here"
-      is NavigationDestination.Trash -> "No notes in Trash"
+      is NavigationDestination.Archive -> "Archive is empty"
+      is NavigationDestination.Trash -> "Trash is empty"
       is NavigationDestination.Settings -> "Cutestar Preferences"
     }
   }
 
   val subtitle = if (hasSearchQuery) {
-    "Try searching for another keyword or tag"
+    "Try searching for another keyword, tag, or checklist item"
   } else {
-    stringResource(R.string.empty_notes_subtitle)
+    when (destination) {
+      is NavigationDestination.Notes -> "Jot down ideas, make colorful checklists, or sketch freely"
+      is NavigationDestination.Reminders -> "Set time-based reminders to keep track of tasks"
+      is NavigationDestination.Label -> "Add this label to notes to group them together"
+      is NavigationDestination.Archive -> "Archived notes will be stored safely here"
+      is NavigationDestination.Trash -> "Deleted notes will appear here before permanent removal"
+      else -> "Configure Cutestar options"
+    }
   }
 
   Box(
     modifier = Modifier
       .fillMaxSize()
-      .padding(32.dp),
+      .padding(horizontal = 24.dp, vertical = 20.dp),
     contentAlignment = Alignment.Center,
   ) {
     Column(
       horizontalAlignment = Alignment.CenterHorizontally,
       verticalArrangement = Arrangement.Center,
     ) {
-      Image(
-        painter = painterResource(R.drawable.ic_cutestar_logo),
-        contentDescription = "Cutestar",
-        modifier = Modifier
-          .size(88.dp)
-          .clip(RoundedCornerShape(22.dp)),
-        contentScale = ContentScale.Crop,
-      )
-      Spacer(modifier = Modifier.height(16.dp))
+      Surface(
+        shape = RoundedCornerShape(24.dp),
+        shadowElevation = 4.dp,
+        tonalElevation = 2.dp,
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+        modifier = Modifier.size(140.dp),
+      ) {
+        Image(
+          painter = painterResource(R.drawable.img_empty_notes),
+          contentDescription = "Cutestar illustration",
+          modifier = Modifier.fillMaxSize(),
+          contentScale = ContentScale.Crop,
+        )
+      }
+      Spacer(modifier = Modifier.height(18.dp))
       Text(
         text = title,
-        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Medium),
+        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, fontSize = 19.sp),
         color = MaterialTheme.colorScheme.onSurface,
         textAlign = TextAlign.Center,
       )
       Spacer(modifier = Modifier.height(6.dp))
       Text(
         text = subtitle,
-        style = MaterialTheme.typography.bodySmall,
+        style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 20.sp),
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         textAlign = TextAlign.Center,
       )
+
+      if (destination is NavigationDestination.Notes && !hasSearchQuery) {
+        Spacer(modifier = Modifier.height(20.dp))
+        Row(
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Button(
+            onClick = onNewNote,
+            colors = ButtonDefaults.buttonColors(containerColor = CutestarPrimary),
+            shape = CircleShape,
+            modifier = Modifier.height(38.dp),
+          ) {
+            Text("Take Note", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+          }
+
+          Button(
+            onClick = onNewList,
+            colors = ButtonDefaults.filledTonalButtonColors(),
+            shape = CircleShape,
+            modifier = Modifier.height(38.dp),
+          ) {
+            Text("New List", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+          }
+
+          Button(
+            onClick = onNewDrawing,
+            colors = ButtonDefaults.filledTonalButtonColors(),
+            shape = CircleShape,
+            modifier = Modifier.height(38.dp),
+          ) {
+            Text("Draw Sketch", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+          }
+        }
+      }
     }
   }
 }

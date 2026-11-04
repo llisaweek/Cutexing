@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Cutestar</string>
+    <string name="search_notes">メモを検索</string>
+    <string name="drawer_open">ナビゲーションを開く</string>
+    <string name="toggle_grid">グリッド表示に切り替え</string>
+    <string name="toggle_list">リスト表示に切り替え</string>
+    <string name="take_a_note">メモを入力…</string>
+    <string name="new_list">新しいリスト</string>
+    <string name="new_drawing">新しい手書き</string>
+    <string name="new_audio">新しい音声メモ</string>
+    <string name="new_photo">新しい写真メモ</string>
+    <string name="nav_notes">メモ</string>
+    <string name="nav_reminders">リマインダー</string>
+    <string name="nav_calendar">カレンダー</string>
+    <string name="nav_archive">アーカイブ</string>
+    <string name="nav_trash">ゴミ箱</string>
+    <string name="nav_settings">設定</string>
+    <string name="nav_help">ヘルプとフィードバック</string>
+    <string name="nav_create_label">新しいラベルを作成</string>
+    <string name="section_pinned">固定済み</string>
+    <string name="section_others">その他</string>
+    <string name="empty_notes_title">追加したメモがここに表示されます</string>
+    <string name="empty_notes_subtitle">アイデア、リスト、メモをすばやく記録</string>
+    <string name="calendar_title">カレンダー</string>
+    <string name="no_notes_for_date">この日のメモはありません</string>
+    <string name="add_note_for_date">この日のメモを追加</string>
+    <string name="alarm_set">アラームを設定しました</string>
+    <string name="alarm_notification_title">メモのリマインダー</string>
+    <string name="language_setting">言語設定</string>
+    <string name="export_text">テキスト形式でエクスポート (.txt)</string>
+    <string name="export_image">画像形式でエクスポート (.png)</string>
+    <string name="import_notes">メモをインポート</string>
+    <string name="import_text">テキストファイルからインポート</string>
+    <string name="import_image">画像からインポート</string>
+</resources>

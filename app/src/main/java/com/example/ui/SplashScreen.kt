@@ -13,20 +13,23 @@ import com.example.R
 import kotlinx.coroutines.delay
 
 /**
- * Splash screen component.
- * Renders ONLY the background container with no children inside, per specification.
+ * Startup splash screen.
+ * Seamlessly transitions to the main page within normal startup time.
  */
 @Composable
 fun SplashScreen(
   onSplashFinished: () -> Unit,
   modifier: Modifier = Modifier,
 ) {
+
+  // Edge-to-edge drawing is already enabled in MainActivity
+  // Optimize startup duration so total elapsed time to main page is kept well within 2 seconds
   LaunchedEffect(Unit) {
-    delay(850) // Smooth initial splash duration
+    delay(600)
     onSplashFinished()
   }
 
-  // Background container with NO children inside
+  // Full-screen background covering the entire display area
   Box(
     modifier = modifier
       .fillMaxSize()
@@ -40,3 +43,4 @@ fun SplashScreen(
     )
   }
 }
+

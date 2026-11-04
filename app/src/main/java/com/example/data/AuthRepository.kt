@@ -4,6 +4,8 @@ import android.app.Activity
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.util.Base64
 import android.util.Log
@@ -38,6 +40,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.ByteArrayOutputStream
 
 class AuthRepository(private val context: Context) {
@@ -70,28 +73,42 @@ class AuthRepository(private val context: Context) {
       .flowOn(Dispatchers.IO)
   }
 
+  fun isOnline(context: Context): Boolean {
+    val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
+    val activeNetwork = cm.activeNetwork ?: return false
+    val capabilities = cm.getNetworkCapabilities(activeNetwork) ?: return false
+    return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+  }
+
   suspend fun syncGoogleUserToFirestore(user: FirebaseUser) = withContext(Dispatchers.IO) {
-    val userRef = db.collection("users").document(user.uid)
-    val snapshot = userRef.get().await()
+    if (!isOnline(context)) return@withContext
+    try {
+      withTimeoutOrNull(3000L) {
+        val userRef = db.collection("users").document(user.uid)
+        val snapshot = userRef.get().await()
 
-    val profileData = mutableMapOf<String, Any>(
-      "userId" to user.uid,
-      "displayName" to (user.displayName ?: "Cutestar User"),
-      "email" to (user.email ?: ""),
-      "updatedAt" to FieldValue.serverTimestamp(),
-    )
+        val profileData = mutableMapOf<String, Any>(
+          "userId" to user.uid,
+          "displayName" to (user.displayName ?: "Cutestar User"),
+          "email" to (user.email ?: ""),
+          "updatedAt" to FieldValue.serverTimestamp(),
+        )
 
-    if (user.photoUrl != null) {
-      profileData["googlePhotoUrl"] = user.photoUrl.toString()
-    }
+        if (user.photoUrl != null) {
+          profileData["googlePhotoUrl"] = user.photoUrl.toString()
+        }
 
-    if (!snapshot.exists()) {
-      profileData["createdAt"] = FieldValue.serverTimestamp()
-      profileData["customAvatarUrl"] = ""
-      profileData["avatarStoragePath"] = ""
-      userRef.set(profileData, SetOptions.merge()).await()
-    } else {
-      userRef.set(profileData, SetOptions.merge()).await()
+        if (!snapshot.exists()) {
+          profileData["createdAt"] = FieldValue.serverTimestamp()
+          profileData["customAvatarUrl"] = ""
+          profileData["avatarStoragePath"] = ""
+          userRef.set(profileData, SetOptions.merge()).await()
+        } else {
+          userRef.set(profileData, SetOptions.merge()).await()
+        }
+      }
+    } catch (e: Exception) {
+      Log.w("AuthRepository", "syncGoogleUserToFirestore note: ${e.message}")
     }
   }
 
@@ -151,11 +168,23 @@ class AuthRepository(private val context: Context) {
     val current = auth.currentUser
     if (current != null) {
       scope.launch {
-        try {
-          syncGoogleUserToFirestore(current)
-        } catch (_: Exception) {}
+        if (isOnline(context)) {
+          try {
+            syncGoogleUserToFirestore(current)
+          } catch (_: Exception) {}
+        }
         onAuthSuccess(current)
       }
+      return
+    }
+
+    // Critical offline protection:
+    // If the device is offline, DO NOT call CredentialManager.
+    // In offline mode, invoking credentialManager.getCredential() launches a transparent
+    // system overlay / activity from Google Play Services that hangs waiting for network,
+    // intercepting all user touch inputs and rendering the app unresponsive until Back is pressed.
+    if (!isOnline(context)) {
+      onUnauthenticated()
       return
     }
 
@@ -176,7 +205,15 @@ class AuthRepository(private val context: Context) {
 
     scope.launch {
       try {
-        val result = credentialManager.getCredential(context, request)
+        // Enforce a strict timeout to guarantee that the UI thread never freezes
+        // and no credential prompt or transparent overlay hangs in a pending state.
+        val result = withTimeoutOrNull(2500L) {
+          credentialManager.getCredential(context, request)
+        }
+        if (result == null) {
+          onUnauthenticated()
+          return@launch
+        }
         val credential = result.credential
         if (credential is CustomCredential && credential.type == TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
           val googleIdToken = GoogleIdTokenCredential.createFrom(credential.data).idToken
@@ -184,7 +221,11 @@ class AuthRepository(private val context: Context) {
           val authResult = auth.signInWithCredential(authCredential).await()
           val user = authResult.user
           if (user != null) {
-            syncGoogleUserToFirestore(user)
+            if (isOnline(context)) {
+              try {
+                syncGoogleUserToFirestore(user)
+              } catch (_: Exception) {}
+            }
             onAuthSuccess(user)
           } else {
             onUnauthenticated()

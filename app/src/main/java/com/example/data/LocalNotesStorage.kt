@@ -116,6 +116,8 @@ class LocalNotesStorage(private val context: Context) {
     obj.put("imageStoragePath", note.imageStoragePath ?: "")
     obj.put("audioUrl", note.audioUrl ?: "")
     obj.put("updatedAt", note.updatedAt)
+    if (note.calendarDate != null) obj.put("calendarDate", note.calendarDate)
+    if (note.alarmTime != null) obj.put("alarmTime", note.alarmTime)
 
     val labelsArray = JSONArray()
     note.labels.forEach { labelsArray.put(it) }
@@ -171,6 +173,8 @@ class LocalNotesStorage(private val context: Context) {
     val imageUrl = obj.optString("imageUrl", "").ifBlank { null }
     val imageStoragePath = obj.optString("imageStoragePath", "").ifBlank { null }
     val audioUrl = obj.optString("audioUrl", "").ifBlank { null }
+    val calendarDate = if (obj.has("calendarDate")) obj.optLong("calendarDate") else null
+    val alarmTime = if (obj.has("alarmTime")) obj.optLong("alarmTime") else null
 
     return NoteItem(
       id = obj.optString("id", java.util.UUID.randomUUID().toString()),
@@ -189,11 +193,22 @@ class LocalNotesStorage(private val context: Context) {
       imageStoragePath = imageStoragePath,
       audioUrl = audioUrl,
       updatedAt = obj.optLong("updatedAt", System.currentTimeMillis()),
+      calendarDate = calendarDate,
+      alarmTime = alarmTime,
     )
+  }
+
+  fun getLanguage(): String {
+    return prefs.getString(KEY_APP_LANGUAGE, "system") ?: "system"
+  }
+
+  fun saveLanguage(languageCode: String) {
+    prefs.edit().putString(KEY_APP_LANGUAGE, languageCode).apply()
   }
 
   companion object {
     private const val KEY_LOCAL_NOTES = "key_cutestar_local_notes"
     private const val KEY_LOCAL_LABELS = "key_cutestar_local_labels"
+    private const val KEY_APP_LANGUAGE = "key_cutestar_app_language"
   }
 }

@@ -2,8 +2,16 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <uses-sdk tools:overrideLibrary="androidx.core,androidx.core.ktx,com.google.firebase.components,com.google.firebase.installations,com.google.firebase.installations.interop,com.google.firebase.common,com.google.firebase.datatransport,com.google.android.datatransport,com.google.firebase.auth,com.google.firebase.firestore,com.google.firebase.storage,com.google.firebase.ai,com.google.firebase.ai.ondevice.interop,com.google.firebase,com.google.firebase.appcheck,com.google.firebase.appcheck.interop,com.google.firebase.appcheck.debug,androidx.credentials,androidx.credentials.playservicesauth,com.google.android.libraries.identity.googleid,com.google.android.gms.base,com.google.android.gms.tasks,com.google.android.gms.common" />
+
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application
         android:allowBackup="true"
@@ -25,6 +33,34 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <receiver
+            android:name=".alarm.CutestarAlarmReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.example.action.CUTESTAR_ALARM" />
+                <action android:name="com.example.action.DISMISS_ALARM" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name=".alarm.CutestarBootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 
 </manifest>

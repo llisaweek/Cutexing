@@ -54,8 +54,10 @@ import androidx.compose.ui.unit.sp
 import com.example.R
 import com.example.model.LayoutMode
 import com.example.model.NoteColor
+import com.example.model.NoteSortOrder
 import com.example.model.UserProfile
 import com.example.ui.theme.CutestarPrimary
+import androidx.compose.material.icons.automirrored.outlined.Sort
 
 @Composable
 fun TopSearchBar(
@@ -64,6 +66,8 @@ fun TopSearchBar(
   layoutMode: LayoutMode,
   onToggleLayoutMode: () -> Unit,
   onOpenDrawer: () -> Unit,
+  sortOrder: NoteSortOrder = NoteSortOrder.MODIFIED_DESC,
+  onSortOrderChange: (NoteSortOrder) -> Unit = {},
   selectedCount: Int = 0,
   onClearSelection: () -> Unit = {},
   onPinSelected: () -> Unit = {},
@@ -78,6 +82,7 @@ fun TopSearchBar(
   val focusManager = LocalFocusManager.current
   val isSelectionMode = selectedCount > 0
   var showColorMenu by remember { mutableStateOf(false) }
+  var showSortMenu by remember { mutableStateOf(false) }
 
   Surface(
     modifier = modifier
@@ -269,6 +274,43 @@ fun TopSearchBar(
               contentDescription = "Clear search",
               tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+          }
+        }
+
+        // Sort Order Menu
+        Box {
+          IconButton(
+            onClick = { showSortMenu = true },
+            modifier = Modifier
+              .size(40.dp)
+              .testTag("sort_notes_button"),
+          ) {
+            Icon(
+              imageVector = Icons.AutoMirrored.Outlined.Sort,
+              contentDescription = "Sort notes",
+              tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+          }
+
+          DropdownMenu(
+            expanded = showSortMenu,
+            onDismissRequest = { showSortMenu = false },
+          ) {
+            NoteSortOrder.entries.forEach { order ->
+              DropdownMenuItem(
+                text = {
+                  Text(
+                    text = order.displayName,
+                    fontWeight = if (sortOrder == order) FontWeight.Bold else FontWeight.Normal,
+                    color = if (sortOrder == order) CutestarPrimary else MaterialTheme.colorScheme.onSurface,
+                  )
+                },
+                onClick = {
+                  showSortMenu = false
+                  onSortOrderChange(order)
+                },
+              )
+            }
           }
         }
 

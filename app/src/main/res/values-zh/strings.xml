@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Cutestar</string>
+    <string name="search_notes">搜索记事</string>
+    <string name="drawer_open">打开抽屉导航</string>
+    <string name="toggle_grid">切换为网格视图</string>
+    <string name="toggle_list">切换为列表视图</string>
+    <string name="take_a_note">添加记事…</string>
+    <string name="new_list">新建清单</string>
+    <string name="new_drawing">新建手绘</string>
+    <string name="new_audio">新建录音</string>
+    <string name="new_photo">新建照片记事</string>
+    <string name="nav_notes">记事</string>
+    <string name="nav_reminders">提醒</string>
+    <string name="nav_calendar">日历</string>
+    <string name="nav_archive">归档</string>
+    <string name="nav_trash">回收站</string>
+    <string name="nav_settings">设置</string>
+    <string name="nav_help">帮助与反馈</string>
+    <string name="nav_create_label">创建新标签</string>
+    <string name="section_pinned">置顶</string>
+    <string name="section_others">其他</string>
+    <string name="empty_notes_title">您添加的记事会显示在这里</string>
+    <string name="empty_notes_subtitle">随手捕捉想法、清单与灵感</string>
+    <string name="calendar_title">日历视图</string>
+    <string name="no_notes_for_date">该日期暂无记事</string>
+    <string name="add_note_for_date">为此日期添加记事</string>
+    <string name="alarm_set">闹钟已设定</string>
+    <string name="alarm_notification_title">记事提醒</string>
+    <string name="language_setting">语言设置</string>
+    <string name="export_text">导出为文本 (.txt)</string>
+    <string name="export_image">导出为图片 (.png)</string>
+    <string name="import_notes">导入记事</string>
+    <string name="import_text">从文本文件导入</string>
+    <string name="import_image">从图片导入</string>
+</resources>
