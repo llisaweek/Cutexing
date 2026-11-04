@@ -28,9 +28,6 @@ object NoteImportExportUtil {
 
   private const val TAG = "NoteImportExportUtil"
 
-  /**
-   * Export single note as a formatted .txt text file and share or save.
-   */
   fun exportNoteAsText(context: Context, note: NoteItem): Uri? {
     return try {
       val sb = StringBuilder()
@@ -69,35 +66,9 @@ object NoteImportExportUtil {
     }
   }
 
-  /**
-   * Export multiple or all notes as a combined JSON or Text backup file.
-   */
   fun exportAllNotesAsJson(context: Context, notes: List<NoteItem>): Uri? {
     return try {
-      val jsonArray = JSONArray()
-      notes.forEach { note ->
-        val obj = JSONObject()
-        obj.put("id", note.id)
-        obj.put("title", note.title)
-        obj.put("content", note.content)
-        obj.put("color", note.color.name)
-        obj.put("isPinned", note.isPinned)
-        obj.put("isArchived", note.isArchived)
-        obj.put("labels", JSONArray(note.labels))
-        val checklistArr = JSONArray()
-        note.checklist.forEach { item ->
-          val itemObj = JSONObject()
-          itemObj.put("text", item.text)
-          itemObj.put("isChecked", item.isChecked)
-          checklistArr.put(itemObj)
-        }
-        obj.put("checklist", checklistArr)
-        obj.put("reminder", note.reminder ?: "")
-        obj.put("calendarDate", note.calendarDate ?: -1L)
-        obj.put("updatedAt", note.updatedAt)
-        jsonArray.put(obj)
-      }
-
+      val jsonArray = serializeNotesToJson(notes)
       val file = File(context.cacheDir, "Cutestar_Notes_Backup_${System.currentTimeMillis()}.json")
       file.writeText(jsonArray.toString(2))
       FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
@@ -107,17 +78,60 @@ object NoteImportExportUtil {
     }
   }
 
-  /**
-   * Render note into a high-resolution PNG image card and return Uri.
-   */
+  fun exportNotesToUri(context: Context, uri: Uri, notes: List<NoteItem>): Boolean {
+    return try {
+      val jsonArray = serializeNotesToJson(notes)
+      context.contentResolver.openOutputStream(uri)?.use { output ->
+        output.write(jsonArray.toString(2).toByteArray())
+        output.flush()
+      }
+      true
+    } catch (e: Exception) {
+      Log.e(TAG, "Error exporting notes to uri: ${e.message}", e)
+      false
+    }
+  }
+
+  private fun serializeNotesToJson(notes: List<NoteItem>): JSONArray {
+    val jsonArray = JSONArray()
+    notes.forEach { note ->
+      val obj = JSONObject()
+      obj.put("id", note.id)
+      obj.put("title", note.title)
+      obj.put("content", note.content)
+      obj.put("color", note.color.name)
+      obj.put("isPinned", note.isPinned)
+      obj.put("isArchived", note.isArchived)
+      obj.put("isDeleted", note.isDeleted)
+      obj.put("labels", JSONArray(note.labels))
+      val checklistArr = JSONArray()
+      note.checklist.forEach { item ->
+        val itemObj = JSONObject()
+        itemObj.put("id", item.id)
+        itemObj.put("text", item.text)
+        itemObj.put("isChecked", item.isChecked)
+        checklistArr.put(itemObj)
+      }
+      obj.put("checklist", checklistArr)
+      obj.put("reminder", note.reminder ?: "")
+      obj.put("drawingUrl", note.drawingUrl ?: "")
+      obj.put("imageUrl", note.imageUrl ?: "")
+      obj.put("audioUrl", note.audioUrl ?: "")
+      obj.put("calendarDate", note.calendarDate ?: -1L)
+      obj.put("alarmTime", note.alarmTime ?: -1L)
+      obj.put("updatedAt", note.updatedAt)
+      jsonArray.put(obj)
+    }
+    return jsonArray
+  }
+
   fun exportNoteAsImage(context: Context, note: NoteItem): Uri? {
     return try {
       val width = 800
       val padding = 40f
       val lineHeight = 38f
 
-      // Calculate required height
-      var estimatedLines = 4 // Base padding & title
+      var estimatedLines = 4
       if (note.title.isNotBlank()) estimatedLines += (note.title.length / 28) + 1
       if (note.content.isNotBlank()) estimatedLines += (note.content.length / 32) + 2
       estimatedLines += note.checklist.size
@@ -128,7 +142,6 @@ object NoteImportExportUtil {
       val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
       val canvas = Canvas(bitmap)
 
-      // Background
       val bgPaint = Paint().apply {
         isAntiAlias = true
         color = note.color.lightColor.hashCode()
@@ -147,7 +160,6 @@ object NoteImportExportUtil {
 
       var currentY = padding + 40f
 
-      // Title
       val titlePaint = Paint().apply {
         isAntiAlias = true
         color = android.graphics.Color.BLACK
@@ -159,7 +171,6 @@ object NoteImportExportUtil {
         currentY += lineHeight * 1.4f
       }
 
-      // Content
       val bodyPaint = Paint().apply {
         isAntiAlias = true
         color = android.graphics.Color.DKGRAY
@@ -174,7 +185,6 @@ object NoteImportExportUtil {
         currentY += 16f
       }
 
-      // Checklist
       if (note.checklist.isNotEmpty()) {
         val checkPaint = Paint().apply {
           isAntiAlias = true
@@ -189,7 +199,6 @@ object NoteImportExportUtil {
         currentY += 16f
       }
 
-      // Metadata footer (Date & App Name)
       val footerPaint = Paint().apply {
         isAntiAlias = true
         color = android.graphics.Color.GRAY
@@ -212,9 +221,6 @@ object NoteImportExportUtil {
     }
   }
 
-  /**
-   * Import notes from text (.txt) or JSON (.json) URI.
-   */
   fun importNotesFromTextUri(context: Context, uri: Uri): List<NoteItem> {
     val results = mutableListOf<NoteItem>()
     try {
@@ -222,15 +228,25 @@ object NoteImportExportUtil {
         BufferedReader(InputStreamReader(stream)).use { reader ->
           val content = reader.readText().trim()
           if (content.startsWith("[") && content.endsWith("]")) {
-            // JSON format
             val jsonArray = JSONArray(content)
             for (i in 0 until jsonArray.length()) {
               val obj = jsonArray.getJSONObject(i)
+              val id = obj.optString("id", UUID.randomUUID().toString())
               val title = obj.optString("title", "Imported Note")
               val body = obj.optString("content", "")
               val colorName = obj.optString("color", NoteColor.DEFAULT.name)
               val color = try { NoteColor.valueOf(colorName) } catch (_: Exception) { NoteColor.DEFAULT }
-              val calDate = if (obj.has("calendarDate") && obj.getLong("calendarDate") > 0) obj.getLong("calendarDate") else null
+              val isPinned = obj.optBoolean("isPinned", false)
+              val isArchived = obj.optBoolean("isArchived", false)
+              val isDeleted = obj.optBoolean("isDeleted", false)
+
+              val labels = mutableListOf<String>()
+              val labelArr = obj.optJSONArray("labels")
+              if (labelArr != null) {
+                for (k in 0 until labelArr.length()) {
+                  labels.add(labelArr.getString(k))
+                }
+              }
 
               val checklist = mutableListOf<ChecklistItem>()
               val checkArr = obj.optJSONArray("checklist")
@@ -239,7 +255,7 @@ object NoteImportExportUtil {
                   val itemObj = checkArr.getJSONObject(j)
                   checklist.add(
                     ChecklistItem(
-                      id = UUID.randomUUID().toString(),
+                      id = itemObj.optString("id", UUID.randomUUID().toString()),
                       text = itemObj.optString("text", ""),
                       isChecked = itemObj.optBoolean("isChecked", false),
                     )
@@ -247,20 +263,36 @@ object NoteImportExportUtil {
                 }
               }
 
+              val reminder = obj.optString("reminder").ifBlank { null }
+              val drawingUrl = obj.optString("drawingUrl").ifBlank { null }
+              val imageUrl = obj.optString("imageUrl").ifBlank { null }
+              val audioUrl = obj.optString("audioUrl").ifBlank { null }
+              val calDate = if (obj.has("calendarDate") && obj.getLong("calendarDate") > 0) obj.getLong("calendarDate") else null
+              val alarmTime = if (obj.has("alarmTime") && obj.getLong("alarmTime") > 0) obj.getLong("alarmTime") else null
+              val updatedAt = obj.optLong("updatedAt", System.currentTimeMillis())
+
               results.add(
                 NoteItem(
-                  id = UUID.randomUUID().toString(),
+                  id = id,
                   title = title,
                   content = body,
                   color = color,
+                  isPinned = isPinned,
+                  isArchived = isArchived,
+                  isDeleted = isDeleted,
+                  labels = labels,
                   checklist = checklist,
+                  reminder = reminder,
+                  drawingUrl = drawingUrl,
+                  imageUrl = imageUrl,
+                  audioUrl = audioUrl,
                   calendarDate = calDate,
-                  updatedAt = System.currentTimeMillis(),
+                  alarmTime = alarmTime,
+                  updatedAt = updatedAt,
                 )
               )
             }
           } else {
-            // Plain text format
             val lines = content.lines()
             val title = lines.firstOrNull()?.trim() ?: "Imported Note"
             val body = if (lines.size > 1) lines.drop(1).joinToString("\n").trim() else ""
@@ -281,9 +313,6 @@ object NoteImportExportUtil {
     return results
   }
 
-  /**
-   * Import note from an image URI (stores image locally and creates NoteItem).
-   */
   fun importNoteFromImageUri(context: Context, imageUri: Uri): NoteItem? {
     return try {
       val imagesDir = File(context.filesDir, "images")

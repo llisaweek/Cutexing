@@ -71,7 +71,7 @@ class CutestarAlarmReceiver : BroadcastReceiver() {
 
     // Launch MainActivity when tapped
     val openIntent = Intent(context, MainActivity::class.java).apply {
-      flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+      setFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
       putExtra(EXTRA_NOTE_ID, noteId)
     }
     val contentPendingIntent = PendingIntent.getActivity(

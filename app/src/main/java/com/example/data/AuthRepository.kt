@@ -47,7 +47,11 @@ class AuthRepository(private val context: Context) {
 
   private val auth: FirebaseAuth = Firebase.auth
   private val db: FirebaseFirestore by lazy {
-    FirebaseFirestore.getInstance(context.getString(R.string.firestore_database_id))
+    try {
+      FirebaseFirestore.getInstance(context.getString(R.string.firestore_database_id))
+    } catch (_: Exception) {
+      FirebaseFirestore.getInstance()
+    }
   }
   private val storage: FirebaseStorage by lazy {
     FirebaseStorage.getInstance()

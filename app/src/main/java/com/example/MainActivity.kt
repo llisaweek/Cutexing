@@ -28,6 +28,14 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.auth
 
+import android.content.res.Configuration
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.ui.CutestarViewModel
+import java.util.Locale
+
 class MainActivity : ComponentActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
@@ -48,6 +56,44 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun AppContent() {
+  val viewModel: CutestarViewModel = viewModel()
+  val currentLanguage by viewModel.currentLanguage.collectAsStateWithLifecycle()
+  val context = LocalContext.current
+
+  val localizedConfiguration = remember(currentLanguage) {
+    val loc = when (currentLanguage) {
+      "zh" -> Locale.SIMPLIFIED_CHINESE
+      "ja" -> Locale.JAPANESE
+      "en" -> Locale.ENGLISH
+      else -> Locale.getDefault()
+    }
+    Configuration(context.resources.configuration).apply {
+      setLocale(loc)
+    }
+  }
+
+  val localizedContext = remember(currentLanguage) {
+    val loc = when (currentLanguage) {
+      "zh" -> Locale.SIMPLIFIED_CHINESE
+      "ja" -> Locale.JAPANESE
+      "en" -> Locale.ENGLISH
+      else -> Locale.getDefault()
+    }
+    val config = Configuration(context.resources.configuration)
+    config.setLocale(loc)
+    context.createConfigurationContext(config)
+  }
+
+  CompositionLocalProvider(
+    LocalConfiguration provides localizedConfiguration,
+    LocalContext provides localizedContext,
+  ) {
+    AppContentBody(viewModel = viewModel)
+  }
+}
+
+@Composable
+fun AppContentBody(viewModel: CutestarViewModel) {
   val context = LocalContext.current
   val scope = rememberCoroutineScope()
   val authRepository = remember { AuthRepository(context) }
@@ -100,6 +146,7 @@ fun AppContent() {
   } else {
     // Main interface accessible directly without requiring an account (Local Storage Mode)
     CutestarScreen(
+      viewModel = viewModel,
       onSignOut = {
         currentUser = null
       },

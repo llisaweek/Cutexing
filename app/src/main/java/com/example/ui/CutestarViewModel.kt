@@ -65,7 +65,11 @@ class CutestarViewModel(application: Application) : AndroidViewModel(application
   private val localStorage = LocalNotesStorage(application)
   private val auth: FirebaseAuth = Firebase.auth
   private val db: FirebaseFirestore by lazy {
-    FirebaseFirestore.getInstance(application.getString(R.string.firestore_database_id))
+    try {
+      FirebaseFirestore.getInstance(application.getString(R.string.firestore_database_id))
+    } catch (_: Exception) {
+      FirebaseFirestore.getInstance()
+    }
   }
   private val storage: FirebaseStorage by lazy {
     FirebaseStorage.getInstance()
@@ -126,6 +130,15 @@ class CutestarViewModel(application: Application) : AndroidViewModel(application
   // Keep Settings preferences
   private val _moveCheckedToBottom = MutableStateFlow(true)
   val moveCheckedToBottom: StateFlow<Boolean> = _moveCheckedToBottom.asStateFlow()
+
+  // App Language preference
+  private val _currentLanguage = MutableStateFlow(localStorage.getLanguage())
+  val currentLanguage: StateFlow<String> = _currentLanguage.asStateFlow()
+
+  fun setLanguage(code: String) {
+    _currentLanguage.value = code
+    localStorage.saveLanguage(code)
+  }
 
   private var profileJob: Job? = null
   private var notesJob: Job? = null
@@ -675,6 +688,7 @@ class CutestarViewModel(application: Application) : AndroidViewModel(application
     var baseList = when (destination) {
       is NavigationDestination.Notes -> allNotes.filter { !it.isArchived && !it.isDeleted }
       is NavigationDestination.Reminders -> allNotes.filter { it.reminder != null && !it.isDeleted }
+      is NavigationDestination.Calendar -> allNotes.filter { !it.isDeleted }
       is NavigationDestination.Label -> allNotes.filter { it.labels.contains(destination.name) && !it.isDeleted }
       is NavigationDestination.Archive -> allNotes.filter { it.isArchived && !it.isDeleted }
       is NavigationDestination.Trash -> allNotes.filter { it.isDeleted }
@@ -1081,5 +1095,33 @@ class CutestarViewModel(application: Application) : AndroidViewModel(application
       checklist = checklist,
       onComplete = { _, _ -> },
     )
+  }
+
+  fun importNotes(importedList: List<NoteItem>) {
+    val currentNotes = _notes.value.toMutableList()
+    importedList.forEach { imported ->
+      val index = currentNotes.indexOfFirst { it.id == imported.id }
+      if (index >= 0) {
+        currentNotes[index] = imported
+      } else {
+        currentNotes.add(0, imported)
+      }
+    }
+    _notes.value = currentNotes
+    localStorage.saveNotes(currentNotes)
+
+    val userId = auth.currentUser?.uid
+    if (userId != null) {
+      viewModelScope.launch(Dispatchers.IO) {
+        importedList.forEach { note ->
+          try {
+            db.collection("users").document(userId).collection("notes").document(note.id)
+              .set(note, SetOptions.merge()).await()
+          } catch (e: Exception) {
+            Log.w("CutestarViewModel", "Error syncing imported note to cloud: ${e.message}")
+          }
+        }
+      }
+    }
   }
 }

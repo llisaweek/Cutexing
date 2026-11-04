@@ -85,6 +85,7 @@ import com.example.model.NavigationDestination
 import com.example.model.NoteColor
 import com.example.model.NoteItem
 import com.example.ui.components.BottomQuickBar
+import com.example.ui.components.CalendarView
 import com.example.ui.components.DrawingEditorDialog
 import com.example.ui.components.EditLabelsDialog
 import com.example.ui.components.NavigationDrawerContent
@@ -95,6 +96,7 @@ import com.example.ui.components.SettingsDialog
 import com.example.ui.components.TopSearchBar
 import com.example.ui.components.VoiceNoteDialog
 import com.example.ui.theme.CutestarPrimary
+import com.example.util.NoteImportExportUtil
 import kotlinx.coroutines.launch
 
 @Composable
@@ -120,6 +122,7 @@ fun CutestarScreen(
   val sortOrder by viewModel.sortOrder.collectAsStateWithLifecycle()
   val selectedNoteIds by viewModel.selectedNoteIds.collectAsStateWithLifecycle()
   val moveCheckedToBottom by viewModel.moveCheckedToBottom.collectAsStateWithLifecycle()
+  val currentLanguage by viewModel.currentLanguage.collectAsStateWithLifecycle()
   val userProfile by viewModel.userProfile.collectAsStateWithLifecycle()
   val isUploadingAvatar by viewModel.isUploadingAvatar.collectAsStateWithLifecycle()
   val uploadProgress by viewModel.uploadProgress.collectAsStateWithLifecycle()
@@ -148,6 +151,79 @@ fun CutestarScreen(
       editingNote = null
       startWithChecklist = false
       showNoteEditor = true
+    }
+  }
+
+  // Import Text / JSON launcher
+  val importTextLauncher = rememberLauncherForActivityResult(
+    contract = ActivityResultContracts.GetContent()
+  ) { uri ->
+    if (uri != null) {
+      val importedNotes = NoteImportExportUtil.importNotesFromTextUri(context, uri)
+      importedNotes.forEach { note ->
+        viewModel.addQuickNote(
+          title = note.title,
+          content = note.content,
+          color = note.color,
+          checklist = note.checklist,
+        )
+      }
+      scope.launch {
+        snackbarHostState.showSnackbar("Imported ${importedNotes.size} note(s) ★")
+      }
+    }
+  }
+
+  // Import Photo Note launcher
+  val importImageLauncher = rememberLauncherForActivityResult(
+    contract = ActivityResultContracts.PickVisualMedia()
+  ) { uri ->
+    if (uri != null) {
+      val imported = NoteImportExportUtil.importNoteFromImageUri(context, uri)
+      if (imported != null) {
+        viewModel.saveFullNote(
+          noteId = imported.id,
+          title = imported.title,
+          content = "",
+          color = NoteColor.DEFAULT,
+          existingImageUrl = imported.imageUrl,
+          onComplete = { _, _ -> },
+        )
+        scope.launch { snackbarHostState.showSnackbar("Photo note imported ★") }
+      }
+    }
+  }
+
+  val exportLocalStorageLauncher = rememberLauncherForActivityResult(
+    contract = ActivityResultContracts.CreateDocument("application/json")
+  ) { uri ->
+    if (uri != null) {
+      val success = NoteImportExportUtil.exportNotesToUri(context, uri, notes)
+      scope.launch {
+        if (success) {
+          snackbarHostState.showSnackbar("Backup exported to local storage ★")
+        } else {
+          snackbarHostState.showSnackbar("Failed to export backup")
+        }
+      }
+    }
+  }
+
+  val importLocalStorageLauncher = rememberLauncherForActivityResult(
+    contract = ActivityResultContracts.GetContent()
+  ) { uri ->
+    if (uri != null) {
+      val importedNotes = NoteImportExportUtil.importNotesFromTextUri(context, uri)
+      if (importedNotes.isNotEmpty()) {
+        viewModel.importNotes(importedNotes)
+        scope.launch {
+          snackbarHostState.showSnackbar("Imported ${importedNotes.size} note(s) from local storage ★")
+        }
+      } else {
+        scope.launch {
+          snackbarHostState.showSnackbar("No valid notes found in file")
+        }
+      }
     }
   }
 
@@ -350,12 +426,26 @@ fun CutestarScreen(
           }
         }
 
-        // Main Notes Staggered Grid
+        // Main Notes Staggered Grid or Calendar View
         val isTrashOrArchive = currentDestination is NavigationDestination.Trash || currentDestination is NavigationDestination.Archive
         val pinnedNotes = if (!isTrashOrArchive) notes.filter { it.isPinned } else emptyList()
         val otherNotes = if (!isTrashOrArchive) notes.filter { !it.isPinned } else notes
 
-        if (notes.isEmpty()) {
+        if (currentDestination is NavigationDestination.Calendar) {
+          CalendarView(
+            notes = notes,
+            onNoteClick = { note ->
+              editingNote = note
+              startWithChecklist = false
+              showNoteEditor = true
+            },
+            onCreateNoteForDate = { _ ->
+              editingNote = null
+              startWithChecklist = false
+              showNoteEditor = true
+            },
+          )
+        } else if (notes.isEmpty()) {
           EmptyNotesState(
             destination = currentDestination,
             hasSearchQuery = searchQuery.isNotEmpty(),
@@ -628,6 +718,30 @@ fun CutestarScreen(
     SettingsDialog(
       moveCheckedToBottom = moveCheckedToBottom,
       onToggleMoveCheckedToBottom = { viewModel.toggleMoveCheckedToBottom(it) },
+      currentLanguage = currentLanguage,
+      onSelectLanguage = { code -> viewModel.setLanguage(code) },
+      onExportAllNotes = {
+        val uri = NoteImportExportUtil.exportAllNotesAsJson(context, notes)
+        if (uri != null) {
+          NoteImportExportUtil.shareExportUri(context, uri, "application/json", "Cutestar Notes Backup")
+        } else {
+          scope.launch { snackbarHostState.showSnackbar("No notes to export") }
+        }
+      },
+      onExportNotesToLocalStorage = {
+        exportLocalStorageLauncher.launch("Cutestar_Backup_${System.currentTimeMillis()}.json")
+      },
+      onImportNotesFromLocalStorage = {
+        importLocalStorageLauncher.launch("application/json")
+      },
+      onImportTextNotes = {
+        importTextLauncher.launch("*/*")
+      },
+      onImportImageNote = {
+        importImageLauncher.launch(
+          PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+        )
+      },
       userProfile = userProfile,
       onDismiss = { showSettingsDialog = false },
     )
@@ -702,6 +816,7 @@ private fun DestinationHeader(destination: NavigationDestination) {
   val title = when (destination) {
     is NavigationDestination.Notes -> stringResource(R.string.nav_notes)
     is NavigationDestination.Reminders -> stringResource(R.string.nav_reminders)
+    is NavigationDestination.Calendar -> stringResource(R.string.nav_calendar)
     is NavigationDestination.Label -> destination.name
     is NavigationDestination.Archive -> stringResource(R.string.nav_archive)
     is NavigationDestination.Trash -> stringResource(R.string.nav_trash)
@@ -749,6 +864,7 @@ private fun EmptyNotesState(
     when (destination) {
       is NavigationDestination.Notes -> "Capture your thoughts ★"
       is NavigationDestination.Reminders -> "No upcoming reminders"
+      is NavigationDestination.Calendar -> "Calendar"
       is NavigationDestination.Label -> "No notes with this label yet"
       is NavigationDestination.Archive -> "Archive is empty"
       is NavigationDestination.Trash -> "Trash is empty"

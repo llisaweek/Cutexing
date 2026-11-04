@@ -38,6 +38,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.material3.Surface
+import androidx.compose.ui.graphics.Color
 import com.example.R
 import com.example.model.UserProfile
 import com.example.ui.theme.CutestarPrimary
@@ -49,6 +51,8 @@ fun SettingsDialog(
   currentLanguage: String,
   onSelectLanguage: (String) -> Unit,
   onExportAllNotes: () -> Unit,
+  onExportNotesToLocalStorage: () -> Unit,
+  onImportNotesFromLocalStorage: () -> Unit,
   onImportTextNotes: () -> Unit,
   onImportImageNote: () -> Unit,
   userProfile: UserProfile?,
@@ -85,6 +89,78 @@ fun SettingsDialog(
             color = MaterialTheme.colorScheme.primary,
           )
         }
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // QUICK TOGGLE BETWEEN JAPANESE AND CHINESE
+        Surface(
+          shape = RoundedCornerShape(14.dp),
+          color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+          modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        ) {
+          Column(modifier = Modifier.padding(12.dp)) {
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+              Column(modifier = Modifier.weight(1f)) {
+                Text(
+                  text = "Switch: 日本語 ⇄ 中文",
+                  style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                )
+                Text(
+                  text = if (currentLanguage == "ja") "Selected: 日本語 (Japanese)" else if (currentLanguage == "zh") "Selected: 中文 (Chinese)" else "Toggle between JA and ZH",
+                  style = MaterialTheme.typography.bodySmall,
+                  color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+              }
+              Switch(
+                checked = currentLanguage == "ja",
+                onCheckedChange = { isJa ->
+                  onSelectLanguage(if (isJa) "ja" else "zh")
+                },
+                colors = SwitchDefaults.colors(checkedThumbColor = CutestarPrimary),
+                modifier = Modifier.testTag("language_toggle_switch"),
+              )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+              Button(
+                onClick = { onSelectLanguage("ja") },
+                colors = ButtonDefaults.buttonColors(
+                  containerColor = if (currentLanguage == "ja") CutestarPrimary else MaterialTheme.colorScheme.surface,
+                  contentColor = if (currentLanguage == "ja") Color.White else MaterialTheme.colorScheme.onSurface,
+                ),
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier
+                  .weight(1f)
+                  .testTag("toggle_lang_ja_btn"),
+              ) {
+                Text("日本語 (JA)", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+              }
+              Button(
+                onClick = { onSelectLanguage("zh") },
+                colors = ButtonDefaults.buttonColors(
+                  containerColor = if (currentLanguage == "zh") CutestarPrimary else MaterialTheme.colorScheme.surface,
+                  contentColor = if (currentLanguage == "zh") Color.White else MaterialTheme.colorScheme.onSurface,
+                ),
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier
+                  .weight(1f)
+                  .testTag("toggle_lang_zh_btn"),
+              ) {
+                Text("中文 (ZH)", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+              }
+            }
+          }
+        }
+
         Spacer(modifier = Modifier.height(6.dp))
 
         val languages = listOf(
@@ -130,6 +206,62 @@ fun SettingsDialog(
           color = MaterialTheme.colorScheme.primary,
         )
         Spacer(modifier = Modifier.height(8.dp))
+
+        // Export to Local Storage
+        Row(
+          modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onExportNotesToLocalStorage)
+            .padding(vertical = 8.dp),
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Icon(
+            imageVector = Icons.Outlined.FileUpload,
+            contentDescription = null,
+            tint = CutestarPrimary,
+            modifier = Modifier.size(20.dp),
+          )
+          Spacer(modifier = Modifier.width(12.dp))
+          Column {
+            Text(
+              text = "Export Backup to Local Storage",
+              style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+            )
+            Text(
+              text = "Save backup file to device storage",
+              style = MaterialTheme.typography.bodySmall,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+          }
+        }
+
+        // Import from Local Storage
+        Row(
+          modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onImportNotesFromLocalStorage)
+            .padding(vertical = 8.dp),
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Icon(
+            imageVector = Icons.Outlined.FileDownload,
+            contentDescription = null,
+            tint = CutestarPrimary,
+            modifier = Modifier.size(20.dp),
+          )
+          Spacer(modifier = Modifier.width(12.dp))
+          Column {
+            Text(
+              text = "Import Backup from Local Storage",
+              style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+            )
+            Text(
+              text = "Restore notes from local storage backup file",
+              style = MaterialTheme.typography.bodySmall,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+          }
+        }
 
         // Export All Notes
         Row(
